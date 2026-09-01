@@ -119,12 +119,13 @@ jobbot/
 │   ├── ingest/
 │   │   ├── base.py            # classe abstraite BaseScraper
 │   │   ├── sources/           # un fichier par source
+│   │   │   ├── emploidakar.py  # source prioritaire n°1 (via admin-ajax.php)
 │   │   │   ├── senjob.py
 │   │   │   ├── emploisenegal.py
 │   │   │   ├── recrutement_sn.py
 │   │   │   ├── offre_emploi_sn.py
 │   │   │   ├── novojob.py
-│   │   │   └── reliefweb.py   # API officielle, à faire EN PREMIER
+│   │   │   └── reliefweb.py   # API officielle, sans risque de casse
 │   │   ├── normalize.py       # nettoyage + extraction email de contact
 │   │   └── dedupe.py
 │   ├── llm/
@@ -221,9 +222,21 @@ Le quota de 25 est un **plafond de coût**, pas une limite arbitraire. Il doit �
 
 ### Priorité d'implémentation des sources
 
-1. **ReliefWeb** — API publique, documentée, gratuite, stable. Offres ONG/international basées à Dakar, bien rémunérées, peu exploitées par la concurrence. **À faire en premier : c'est la seule source sans risque de casse.**
-2. `senjob.com`, `emploisenegal.com`, `recrutement.sn`, `offre-emploi.sn`, `novojob.com` — scraping HTML.
-3. Expat-Dakar (section emploi) — volume élevé, qualité variable.
+1. **`emploidakar.com`** — **priorité n°1, tranchée par le porteur du projet le 2026-09-01.** Considérée comme la meilleure source du marché local. WordPress + WP Job Manager. Voir ci-dessous les contraintes techniques relevées : elles ne sont pas optionnelles.
+2. **ReliefWeb** — API publique, documentée, gratuite, stable. Offres ONG/international basées à Dakar, bien rémunérées, peu exploitées par la concurrence. **Seule source sans risque de casse** : c'est elle qui valide `BaseScraper`, `normalize` et `dedupe` sans dépendre de la santé d'un site tiers.
+3. `senjob.com`, `emploisenegal.com`, `recrutement.sn`, `offre-emploi.sn`, `novojob.com` — scraping HTML.
+4. Expat-Dakar (section emploi) — volume élevé, qualité variable.
+
+### emploidakar.com — reconnaissance du 2026-09-01
+
+Constats de terrain, à respecter dans `sources/emploidakar.py` :
+
+- **Point d'entrée = `admin-ajax.php`, pas le HTML de liste.** Les offres ne sont pas dans le HTML de `/offres-demploi-au-senegal/` : WP Job Manager les charge en AJAX via `POST /wp-admin/admin-ajax.php` avec `action=job_manager_get_listings`. Le `robots.txt` du site **autorise explicitement** `/wp-admin/admin-ajax.php` (`Allow:` au milieu d'un `Disallow: /wp-admin/`). C'est donc le chemin propre et documenté.
+- **L'API REST WordPress est un piège.** `/wp-json/wp/v2/job-listings` est bien déclarée (`rest_base = job-listings`), mais Cloudflare renvoie un challenge « Just a moment… » (HTTP 403) dès la 2e ou 3e requête, y compris sur `/wp-json/wp/v2/posts`. **Ne pas construire le scraper dessus.**
+- **Interdiction de franchir le challenge Cloudflare.** Pas de User-Agent de navigateur usurpé, pas de solveur de challenge, pas de navigateur headless pour passer l'interstitiel. C'est de l'évasion de détection, exclue par §2.4, et un bannissement d'IP au niveau Cloudflare emporterait **tous** les scrapers hébergés sur le même VPS. Si l'endpoint AJAX venait à passer lui aussi sous challenge : on arrête cette source et on remonte le problème au porteur du projet, on ne contourne pas.
+- **Rythme validé** : User-Agent identifiable + 5 à 8 s entre requêtes → les pages publiques répondent en 200 de façon stable, y compris après que le challenge se soit déclenché sur `/wp-json/`. Ne pas descendre sous le plancher de §2.4.
+- **Zones interdites par `robots.txt`, à coder en liste noire explicite** : `/resume/`, `/CV/`, `/wp-content/uploads/job_applications/` (CVthèque et candidatures déposées par des tiers). Aucune utilité pour nous, et ce sont des données personnelles appartenant à autrui.
+- **Chiffre encore inconnu, à mesurer dès la première passe** : la proportion d'annonces contenant un email de candidature extractible. C'est ce qui déterminera si la source alimente vraiment l'auto-submit ou seulement le mode brouillon (§7, extraction de l'email). À remonter au porteur du projet une fois connu.
 
 Chaque scraper hérite de `BaseScraper` et implémente `fetch_list()` et `parse_detail()`. **Chaque scraper doit avoir un test avec un fichier HTML figé dans `tests/fixtures/`** — c'est le seul moyen de détecter qu'un site a changé de structure.
 
@@ -301,7 +314,7 @@ Repo, Docker Compose, config, modèles + migrations, bot qui répond `/start`, h
 *Validation : `docker compose up` fonctionne sur une machine vierge à partir du seul `.env.example`.*
 
 **Phase 1 — Ingestion (1 sem.)**
-`BaseScraper`, source ReliefWeb, puis 2 sites sénégalais. Normalisation, dédoublonnage, extraction d'email. Commande admin `/stats_ingest`.
+`BaseScraper`, source `emploidakar.com` (priorité n°1), ReliefWeb, puis 2 autres sites sénégalais. Normalisation, dédoublonnage, extraction d'email. Commande admin `/stats_ingest`.
 *Validation : 100+ offres uniques en base, dont au moins 30 avec un email de candidature valide.*
 
 **Phase 2 — Profil (1 sem.)**
