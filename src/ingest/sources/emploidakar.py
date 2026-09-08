@@ -14,7 +14,7 @@ from typing import Any
 
 from selectolax.parser import HTMLParser, Node
 
-from src.ingest.base import JobDetail, RawJob
+from src.ingest.base import JobDetail, RawJob, ResultatListe
 from src.ingest.normalize import extract_apply_email
 
 SOURCE = "emploidakar"
@@ -31,20 +31,26 @@ def _texte(noeud: Node | None) -> str | None:
     return valeur or None
 
 
-def parse_list(payload: dict[str, Any]) -> list[RawJob]:
-    """Convertit la réponse AJAX en offres brutes."""
+def parse_list(payload: dict[str, Any]) -> ResultatListe:
+    """Convertit la réponse AJAX en offres brutes.
+
+    Les entrées inexploitables sont écartées mais **comptées** : un site qui
+    change à moitié de structure doit se voir, pas se perdre en silence (§7).
+    """
     html = payload.get("html") or ""
     if not html:
-        return []
+        return ResultatListe(offres=(), ignorees=0)
 
     offres: list[RawJob] = []
+    ignorees = 0
     for item in HTMLParser(html).css("li.job_listing"):
         identifiant = _ID_OFFRE.search(item.attributes.get("class") or "")
         lien = item.css_first("a[href]")
         titre = _texte(item.css_first("h3"))
         if identifiant is None or lien is None or titre is None:
-            # Une offre incomplète est ignorée plutôt que de polluer la base ;
-            # le détecteur de scraper cassé (§7) verra la chute de volume.
+            # Écartée plutôt que de polluer la base, mais comptée : c'est
+            # `verifier_coherence_liste` qui décide si le taux est anormal.
+            ignorees += 1
             continue
         offres.append(
             RawJob(
@@ -57,7 +63,7 @@ def parse_list(payload: dict[str, Any]) -> list[RawJob]:
                 contract_type=_texte(item.css_first("li.job-type")),
             )
         )
-    return offres
+    return ResultatListe(offres=tuple(offres), ignorees=ignorees)
 
 
 def nombre_de_pages(payload: dict[str, Any]) -> int:

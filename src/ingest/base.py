@@ -35,6 +35,41 @@ class JobDetail:
     apply_method: str = "form"
 
 
+@dataclass(frozen=True, slots=True)
+class ResultatListe:
+    """Offres lues sur une page, et nombre d'entrées écartées."""
+
+    offres: tuple[RawJob, ...]
+    ignorees: int
+
+
+class StructureInattendueError(RuntimeError):
+    """Le site ne rend plus la structure attendue (CLAUDE.md §7)."""
+
+
+def verifier_coherence_liste(
+    *, offres_lues: int, offres_ignorees: int, pages_annoncees: int
+) -> None:
+    """Vérifie qu'une page de liste ressemble encore à ce qu'on sait lire.
+
+    Appelée à chaque passe sur les données réelles : c'est le seul garde-fou
+    qui voit une refonte du site, les fixtures étant figées par construction.
+    """
+    if pages_annoncees <= 0:
+        # Recherche légitimement vide : ce n'est pas une casse.
+        return
+    if offres_lues == 0:
+        raise StructureInattendueError(
+            f"{pages_annoncees} page(s) annoncée(s) mais aucune offre lue — "
+            "les sélecteurs ne correspondent plus au site"
+        )
+    total = offres_lues + offres_ignorees
+    if offres_ignorees * 2 > total:
+        raise StructureInattendueError(
+            f"{offres_ignorees}/{total} entrées écartées — structure partiellement changée"
+        )
+
+
 class CheminInterditError(RuntimeError):
     """Chemin exclu par le robots.txt du site visé (CLAUDE.md §2, interdiction n°4)."""
 

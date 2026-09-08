@@ -28,11 +28,11 @@ def html_detail() -> str:
 
 
 def test_parse_list_retourne_toutes_les_offres_de_la_page(payload_liste: dict[str, object]) -> None:
-    assert len(emploidakar.parse_list(payload_liste)) == 17
+    assert len(emploidakar.parse_list(payload_liste).offres) == 17
 
 
 def test_parse_list_extrait_les_champs_de_l_offre(payload_liste: dict[str, object]) -> None:
-    offre = emploidakar.parse_list(payload_liste)[0]
+    offre = emploidakar.parse_list(payload_liste).offres[0]
     assert offre.source == "emploidakar"
     assert offre.source_id == "503219"
     assert offre.url.startswith("https://www.emploidakar.com/offre-demploi/")
@@ -43,7 +43,8 @@ def test_parse_list_extrait_les_champs_de_l_offre(payload_liste: dict[str, objec
 
 
 def test_parse_list_sans_offre_retourne_une_liste_vide() -> None:
-    assert emploidakar.parse_list({"found_jobs": False, "html": "", "max_num_pages": 0}) == []
+    payload = {"found_jobs": False, "html": "", "max_num_pages": 0}
+    assert emploidakar.parse_list(payload).offres == ()
 
 
 def test_nombre_de_pages_lit_la_pagination(payload_liste: dict[str, object]) -> None:
