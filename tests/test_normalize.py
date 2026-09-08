@@ -52,3 +52,34 @@ def test_ignore_les_faux_positifs_de_type_fichier() -> None:
 def test_normalise_la_casse_et_la_ponctuation_finale() -> None:
     texte = "Merci d'adresser votre dossier à RECRUTEMENT@XYZ.SN."
     assert extract_apply_email(texte, DOMAINE) == "recrutement@xyz.sn"
+
+
+def test_ne_colle_pas_la_phrase_suivante_a_l_adresse() -> None:
+    """Cas très fréquent en français scrapé : pas d'espace après le point final.
+
+    Sans ce garde-fou on produit `rh@xyz.sn.merci`, une adresse qui a l'air
+    valide, part en auto-submit (§7) et revient en hard bounce — ce qui détruit
+    la délivrabilité du domaine d'envoi et décompte quand même le quota.
+    """
+    texte = "Envoyez votre dossier a rh@xyz.sn.Merci de preciser le poste."
+    assert extract_apply_email(texte, DOMAINE) == "rh@xyz.sn"
+
+
+def test_ne_colle_pas_non_plus_un_mot_en_minuscules() -> None:
+    assert extract_apply_email("Adresse: rh@xyz.sn.objet candidature", DOMAINE) == "rh@xyz.sn"
+
+
+def test_conserve_un_sous_domaine_legitime() -> None:
+    """`mail.societe.com` ne doit pas être tronqué : le dernier label est un TLD."""
+    assert (
+        extract_apply_email("Ecrire a rh@mail.societe.com", DOMAINE) == "rh@mail.societe.com"
+    )
+
+
+def test_conserve_un_tld_inhabituel_sur_deux_labels() -> None:
+    """Deux labels seulement : rien à trancher, on ne touche pas."""
+    assert extract_apply_email("Ecrire a rh@startup.africa", DOMAINE) == "rh@startup.africa"
+
+
+def test_conserve_un_domaine_en_deux_niveaux() -> None:
+    assert extract_apply_email("Ecrire a rh@societe.co.uk", DOMAINE) == "rh@societe.co.uk"
