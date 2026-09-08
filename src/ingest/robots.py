@@ -13,7 +13,6 @@ tranche, `Allow` l'emportant à longueur égale.
 
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass
 from urllib.parse import urlsplit
 
@@ -22,15 +21,40 @@ from urllib.parse import urlsplit
 class _Regle:
     autorise: bool
     motif: str
-    expression: re.Pattern[str]
 
 
-def _compiler(motif: str) -> re.Pattern[str]:
-    """Traduit un motif robots.txt (`*` joker, `$` fin de chaîne) en regex."""
+def _correspond(motif: str, chemin: str) -> bool:
+    """Teste un motif robots.txt (`*` joker, `$` fin de chaîne) sur un chemin.
+
+    Volontairement SANS expression régulière. Traduire `*` en `.*` provoque un
+    recul catastrophique : un `robots.txt` hostile — un fichier que nous allons
+    chercher nous-mêmes sur le site — figeait la passe pendant des minutes par
+    URL testée. L'appariement glouton ci-dessous est linéaire et ne recule pas.
+    """
     ancre_fin = motif.endswith("$")
-    corps = motif[:-1] if ancre_fin else motif
-    regex = "".join(".*" if c == "*" else re.escape(c) for c in corps)
-    return re.compile(regex + ("$" if ancre_fin else ""))
+    segments = (motif[:-1] if ancre_fin else motif).split("*")
+
+    if not chemin.startswith(segments[0]):
+        return False
+    if len(segments) == 1:
+        # Aucun joker : préfixe, ou égalité stricte si le motif est ancré.
+        return chemin == segments[0] if ancre_fin else True
+
+    position = len(segments[0])
+    for segment in segments[1:-1]:
+        if not segment:
+            continue
+        trouve = chemin.find(segment, position)
+        if trouve < 0:
+            return False
+        position = trouve + len(segment)
+
+    dernier = segments[-1]
+    if not dernier:
+        return True
+    if ancre_fin:
+        return chemin.endswith(dernier) and len(chemin) - len(dernier) >= position
+    return chemin.find(dernier, position) >= 0
 
 
 class ReglesRobots:
@@ -61,7 +85,7 @@ class ReglesRobots:
             elif champ in ("allow", "disallow") and groupes:
                 entete_en_cours = False
                 if valeur:  # « Disallow: » vide = aucune restriction.
-                    groupes[-1][1].append(_Regle(champ == "allow", valeur, _compiler(valeur)))
+                    groupes[-1][1].append(_Regle(champ == "allow", valeur))
 
         # Un groupe visant explicitement notre agent l'emporte sur les groupes `*`.
         cibles = [g for g in groupes if any(t != "*" and t in agent for t in g[0])]
@@ -79,7 +103,7 @@ class ReglesRobots:
 
         meilleure: _Regle | None = None
         for regle in self._regles:
-            if not regle.expression.match(chemin):
+            if not _correspond(regle.motif, chemin):
                 continue
             if meilleure is None or len(regle.motif) > len(meilleure.motif):
                 meilleure = regle

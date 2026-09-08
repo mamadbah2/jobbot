@@ -15,11 +15,29 @@ from urllib.parse import urlsplit
 
 from selectolax.parser import HTMLParser, Node
 
-from src.ingest.base import JobDetail, RawJob, ResultatListe
+from src.ingest.base import (
+    BaseScraper,
+    JobDetail,
+    PageListe,
+    RawJob,
+    ResultatListe,
+    StructureInattendueError,
+)
 from src.ingest.normalize import extract_apply_email
 
 SOURCE = "emploidakar"
 DOMAINE = "emploidakar.com"
+
+# Seul point d'entrée autorisé par le robots.txt et non protégé par Cloudflare (§7).
+URL_AJAX = "https://www.emploidakar.com/wp-admin/admin-ajax.php"
+URL_ROBOTS = "https://www.emploidakar.com/robots.txt"
+
+# Taille de page servie par le thème ; la changer ferait diverger `max_num_pages`.
+OFFRES_PAR_PAGE = 17
+
+# Zones exclues par le robots.txt du site : CVthèque et candidatures déposées
+# par des tiers (§7). Codées en dur pour tenir même si robots.txt est injoignable.
+CHEMINS_INTERDITS = ("/resume/", "/cv/", "/wp-content/uploads/job_applications/")
 
 # WP Job Manager préfixe chaque <li> par la classe « post-<id> ».
 _ID_OFFRE = re.compile(r"\bpost-(\d+)\b")
@@ -131,3 +149,47 @@ def _methode_declaree(arbre: HTMLParser) -> tuple[str | None, str | None]:
             if hote != DOMAINE and lien_externe is None:
                 lien_externe = href
     return mailto, lien_externe
+
+
+class EmploiDakarScraper(BaseScraper):
+    """Source prioritaire n°1 (CLAUDE.md §7).
+
+    La boucle — pagination, cohérence, robots.txt, arrêt sur challenge — est
+    dans `BaseScraper` : il ne reste ici que les deux accès réseau.
+    """
+
+    source = SOURCE
+    domaine = DOMAINE
+    url_robots = URL_ROBOTS
+    chemins_interdits = CHEMINS_INTERDITS
+    # Rythme validé par la reconnaissance du 2026-09-01 : 5 à 8 s (§7). C'est
+    # au-dessus du plancher général de §2.4, donc au-dessus du réglage global.
+    delai_minimum = 5.0
+
+    async def fetch_list(self, page: int) -> PageListe:
+        """Une page de liste, servie par WP Job Manager en AJAX (§7)."""
+        reponse = await self._client.post(
+            URL_AJAX,
+            data={
+                "action": "job_manager_get_listings",
+                "page": str(page),
+                "per_page": str(OFFRES_PAR_PAGE),
+                "orderby": "date",
+                "order": "DESC",
+            },
+        )
+        reponse.raise_for_status()
+        try:
+            payload: dict[str, Any] = reponse.json()
+        except ValueError as exc:
+            # 200 mais pas du JSON : le point d'entrée a changé, il faut le revoir (§7).
+            raise StructureInattendueError(
+                "admin-ajax.php ne renvoie plus de JSON — point d'entrée à revérifier"
+            ) from exc
+        return PageListe(resultat=parse_list(payload), pages_totales=nombre_de_pages(payload))
+
+    async def parse_detail(self, offre: RawJob) -> JobDetail:
+        """Ouvre l'annonce pour la description et l'email de candidature (§7)."""
+        reponse = await self._client.get(offre.url)
+        reponse.raise_for_status()
+        return parse_detail(reponse.text)
