@@ -110,6 +110,7 @@ jobbot/
 ├── src/
 │   ├── config.py              # pydantic Settings
 │   ├── logging_setup.py       # structlog JSON, appelé par chaque entrypoint
+│   ├── alerting.py            # alerte admin (scraper cassé, source bloquée)
 │   ├── health.py              # app FastAPI : /health (DB + Redis)
 │   ├── worker_ingest.py       # entrypoint process worker_ingest (APScheduler)
 │   ├── worker_match.py        # entrypoint process worker_match (APScheduler)
@@ -129,6 +130,7 @@ jobbot/
 │   │   ├── normalize.py       # nettoyage + extraction email de contact
 │   │   ├── pagination.py      # politique de pagination incrémentale
 │   │   ├── robots.py          # lecture de robots.txt (robotparser inutilisable, cf §7)
+│   │   ├── store.py           # écriture des offres (upsert sur source+source_id)
 │   │   └── dedupe.py
 │   ├── llm/
 │   │   ├── client.py          # wrapper DeepSeek + retry + compteur de coût

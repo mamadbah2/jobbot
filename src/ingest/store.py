@@ -16,7 +16,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Protocol
 
 from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import Insert, insert
@@ -175,3 +175,24 @@ async def enregistrer_offres(
         ecrites += 1
 
     return ResultatEcriture(ecrites=ecrites, ignorees=ignorees)
+
+
+class DepotOffres(Protocol):
+    """Accès base vu par le worker — permet de le tester sans Postgres."""
+
+    async def ids_connus(self, source: str) -> set[str]: ...
+
+    async def enregistrer(self, offres: Iterable[OffreComplete]) -> ResultatEcriture: ...
+
+
+@dataclass(frozen=True, slots=True)
+class DepotSql:
+    """Implémentation réelle, adossée à une session SQLAlchemy."""
+
+    session: AsyncSession
+
+    async def ids_connus(self, source: str) -> set[str]:
+        return await charger_source_ids(self.session, source)
+
+    async def enregistrer(self, offres: Iterable[OffreComplete]) -> ResultatEcriture:
+        return await enregistrer_offres(self.session, offres)
