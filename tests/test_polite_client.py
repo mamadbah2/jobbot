@@ -94,3 +94,30 @@ async def test_autorise_un_chemin_normal_malgre_la_liste_noire() -> None:
     poli = _client(horloge, chemins_interdits=("/resume/", "/cv/"))
     reponse = await poli.get("https://exemple.sn/offre-demploi/chef-de-parc/")
     assert reponse.status_code == 200
+
+
+async def test_refuse_une_url_interdite_par_le_robots_txt_charge() -> None:
+    """Les règles lues à l'exécution priment sur la liste noire en dur."""
+    from src.ingest.robots import ReglesRobots
+
+    horloge = HorlogeFactice()
+    poli = _client(horloge, regles=ReglesRobots.analyser("User-agent: *\nDisallow: /prive/\n", UA))
+    with pytest.raises(CheminInterditError):
+        await poli.get("https://exemple.sn/prive/x")
+
+
+async def test_autorise_toujours_la_lecture_de_robots_txt() -> None:
+    """Sans exception, on ne pourrait jamais relire le fichier lui-même."""
+    from src.ingest.robots import ReglesRobots
+
+    horloge = HorlogeFactice()
+    poli = _client(horloge, regles=ReglesRobots.analyser("User-agent: *\nDisallow: /\n", UA))
+    assert (await poli.get("https://exemple.sn/robots.txt")).status_code == 200
+
+
+async def test_la_liste_noire_en_dur_reste_un_plancher() -> None:
+    """Si robots.txt est injoignable, les chemins sensibles restent refusés."""
+    horloge = HorlogeFactice()
+    poli = _client(horloge, chemins_interdits=("/resume/",), regles=None)
+    with pytest.raises(CheminInterditError):
+        await poli.get("https://exemple.sn/resume/x")

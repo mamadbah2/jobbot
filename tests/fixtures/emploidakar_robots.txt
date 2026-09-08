@@ -1,0 +1,57 @@
+User-agent: *
+Disallow: /wp-admin/
+Allow: /wp-admin/admin-ajax.php
+
+User-agent: *
+Disallow: /wp-includes/
+
+User-agent: *
+Disallow: /wp-content/uploads/job_applications/
+
+User-agent: *
+Disallow: /resume/
+
+User-agent: *
+Disallow: /CV/
+
+User-agent: MauiBot
+Disallow: /
+
+User-agent: 2345Explorer
+Disallow: /
+
+User-agent: coccocbot-web
+Disallow: /
+
+User-agent: SemrushBot
+Disallow: /
+
+User-agent: facebookexternalhit
+Disallow: /
+
+User-agent: GrapeshotCrawler
+Disallow: /
+
+User-agent: DotBot
+Disallow: /
+
+User-agent: YandexBot
+Disallow: /
+
+User-agent: Yandex
+Disallow: /
+
+User-agent: FreeWebMonitoring SiteChecker
+Disallow: /
+
+User-agent: MJ12bot
+Disallow: /
+
+User-agent: BLEXBot
+Disallow: /
+
+
+Sitemap: https://www.emploidakar.com/post-sitemap.xml	
+Sitemap: https://www.emploidakar.com/page-sitemap.xml	
+Sitemap: https://www.emploidakar.com/category-sitemap.xml	
+Sitemap: https://www.emploidakar.com/job_listing-sitemap.xml
