@@ -7,7 +7,7 @@
 
 ## 1. Mission
 
-Bot Telegram qui centralise les offres d'emploi du marché sénégalais, génère un CV adapté + une lettre de motivation via IA, et soumet la candidature à la place de l'utilisateur quand c'est possible.
+Bot Telegram qui centralise les offres d'emploi du marché sénégalais, repère celles qui correspondent au profil de l'utilisateur, et prépare pour chacune un CV adapté + une lettre de motivation via IA. **C'est l'utilisateur qui dépose sa candidature**, jamais le bot.
 
 Modèle économique : abonnement mensuel ~1 000 FCFA, payé en mobile money (Wave / Orange Money / Free Money).
 
@@ -24,13 +24,13 @@ Ces points ont été tranchés par le porteur du projet. Ne les remets pas en qu
 | Interface = **Telegram** uniquement | Figé |
 | LLM = **DeepSeek** (API compatible OpenAI) | Figé |
 | Monétisation = **abonnement mensuel** (pas de packs) | Figé |
-| Auto-submit = **email uniquement** au départ | Figé |
+| **Aucun envoi de candidature par le bot** — il prépare, l'utilisateur dépose | Figé le 2026-09-08 |
 | Langue de l'interface et des documents = **français** | Figé |
 | Paiement = **mobile money via agrégateur local** | Figé |
 
 ### Interdictions strictes
 
-1. **Ne jamais automatiser la soumission sur LinkedIn, Indeed, Talent.com ou tout site à login utilisateur.** Risque de bannissement des comptes des utilisateurs. Pour ces offres : mode « brouillon » (documents générés + lien direct, l'utilisateur soumet lui-même).
+1. **Ne jamais soumettre une candidature à la place de l'utilisateur, par aucun canal.** Ni formulaire, ni site à login, ni email. Le bot produit les documents et indique où déposer ; le dépôt est toujours un geste de l'utilisateur. Cette règle était limitée aux sites à login (LinkedIn, Indeed, Talent.com) ; elle a été **généralisée le 2026-09-08** par le porteur du projet. Conséquence : il n'y a plus de « mode brouillon » à distinguer, c'est le seul mode.
 2. **Ne jamais stocker de mot de passe utilisateur en clair**, et ne jamais demander le mot de passe d'une boîte mail. Si l'envoi depuis l'adresse de l'utilisateur devient nécessaire → OAuth Gmail uniquement, jamais de mot de passe applicatif saisi dans le bot.
 3. **Ne jamais envoyer deux lettres de motivation structurellement identiques.** Voir §8 (anti-détection).
 4. **Ne jamais scraper sans délai ni User-Agent identifiable.** Respect de `robots.txt`, 1 requête / 3-5 s par domaine.
@@ -52,7 +52,6 @@ Parsing HTML selectolax (rapide) ; BeautifulSoup seulement si le HTML est sale
 LLM          DeepSeek API via le SDK openai (base_url=https://api.deepseek.com)
 Docs         python-docx pour générer ; LibreOffice headless pour convertir en PDF
 CV entrant   pdfplumber (PDF) + python-docx (DOCX)
-Email        SMTP transactionnel (Brevo ou Resend) — voir §7
 Config       pydantic-settings, tout par variables d'environnement
 Logs         structlog en JSON
 Tests        pytest + pytest-asyncio
@@ -142,8 +141,7 @@ jobbot/
 │   │   ├── render.py          # profil -> .docx -> .pdf
 │   │   └── templates/         # 4 templates .docx distincts minimum
 │   ├── apply/
-│   │   ├── email_apply.py     # le seul canal d'auto-submit
-│   │   └── draft.py           # mode brouillon pour les sites hardened
+│   │   └── draft.py           # dossier prêt à déposer + où déposer (seul mode)
 │   ├── billing/
 │   │   ├── provider.py        # abstraction agrégateur mobile money
 │   │   └── webhook.py
@@ -175,7 +173,14 @@ Tables minimales (à créer via Alembic, pas de `create_all` en prod) :
 
 **`jobs`** — `source`, `source_id`, `url` (unique), `title`, `company`, `location`, `contract_type`, `description`, `apply_email` (nullable), `apply_method` (email/form/external), `posted_at`, `expires_at`, `fingerprint` (pour dédoublonnage), `raw` (JSONB)
 
-**`applications`** — `user_id` FK, `job_id` FK, `status` (draft/sent/failed/bounced), `cv_path`, `letter_path`, `sent_at`, `template_variant`, `llm_cost_usd`, `error`. **Contrainte unique `(user_id, job_id)`** — un utilisateur ne postule qu'une fois par offre.
+**`applications`** — `user_id` FK, `job_id` FK, `status` (draft/ready/deposed/failed — le bot n'envoie rien, `deposed` est déclaré par l'utilisateur), `cv_path`, `letter_path`, `sent_at`, `template_variant`, `llm_cost_usd`, `error`. **Contrainte unique `(user_id, job_id)`** — un utilisateur ne postule qu'une fois par offre.
+
+> ⚠️ **Écart connu entre ce document et la base.** La table `applications` créée en
+> Phase 0 porte encore la contrainte `CHECK` d'origine (`draft/sent/failed/bounced`)
+> et une colonne `sent_at`, héritées du modèle avec envoi automatique. Migration à
+> faire **en Phase 4**, quand cette table sera réellement écrite pour la première
+> fois — pas avant : rien ne l'utilise aujourd'hui et une migration à vide n'a
+> aucun intérêt.
 
 **`usage_counters`** — `user_id`, `period` (YYYY-MM), `applications_count`, `llm_tokens_in`, `llm_tokens_out`, `cost_usd`
 
@@ -202,7 +207,7 @@ Index obligatoires : `jobs.fingerprint`, `jobs.posted_at`, `applications.user_id
 |---|---|---|
 | Alertes offres | 5/jour, sans filtre | Illimitées, filtrées par profil |
 | Candidatures générées | **2 au total** (essai) | **25 / mois** |
-| Envoi automatique par email | non | oui |
+| Dossier complet prêt à déposer (CV adapté + lettre) | non | oui |
 | Suivi + relance J+7 | non | oui |
 
 Le quota de 25 est un **plafond de coût**, pas une limite arbitraire. Il doit être configurable par variable d'environnement (`PRO_MONTHLY_QUOTA`).
@@ -240,7 +245,7 @@ Constats de terrain, à respecter dans `sources/emploidakar.py` :
 - **Interdiction de franchir le challenge Cloudflare.** Pas de User-Agent de navigateur usurpé, pas de solveur de challenge, pas de navigateur headless pour passer l'interstitiel. C'est de l'évasion de détection, exclue par §2.4, et un bannissement d'IP au niveau Cloudflare emporterait **tous** les scrapers hébergés sur le même VPS. Si l'endpoint AJAX venait à passer lui aussi sous challenge : on arrête cette source et on remonte le problème au porteur du projet, on ne contourne pas.
 - **Rythme validé** : User-Agent identifiable + 5 à 8 s entre requêtes → les pages publiques répondent en 200 de façon stable, y compris après que le challenge se soit déclenché sur `/wp-json/`. Ne pas descendre sous le plancher de §2.4.
 - **Zones interdites par `robots.txt`, à coder en liste noire explicite** : `/resume/`, `/CV/`, `/wp-content/uploads/job_applications/` (CVthèque et candidatures déposées par des tiers). Aucune utilité pour nous, et ce sont des données personnelles appartenant à autrui.
-- **Chiffre encore inconnu, à mesurer dès la première passe** : la proportion d'annonces contenant un email de candidature extractible. C'est ce qui déterminera si la source alimente vraiment l'auto-submit ou seulement le mode brouillon (§7, extraction de l'email). À remonter au porteur du projet une fois connu.
+- **Chiffre encore inconnu, à mesurer dès la première passe** : la proportion d'annonces contenant un email de candidature extractible. Cela ne conditionne plus un envoi (§2), mais la qualité de l'aide au dépôt : une offre avec email est plus simple à déposer pour l'utilisateur qu'un formulaire. À remonter au porteur du projet une fois connu.
 
 Chaque scraper hérite de `BaseScraper` et implémente `fetch_list()` et `parse_detail()`. **Chaque scraper doit avoir un test avec un fichier HTML figé dans `tests/fixtures/`** — c'est le seul moyen de détecter qu'un site a changé de structure.
 
@@ -251,17 +256,20 @@ Si un scraper renvoie 0 offre alors qu'il en renvoyait > 0 la veille → log niv
 C'est le cœur de la valeur. Beaucoup d'annonces sénégalaises disent simplement « envoyez CV + LM à `recrutement@xyz.sn` ».
 
 - Regex email sur la description, puis validation : rejeter les emails du site lui-même (`@senjob.com`, etc.) et les emails génériques de webmaster.
-- Si un email valide est trouvé → `apply_method = 'email'` → auto-submit possible.
-- Sinon → `apply_method = 'form'` → mode brouillon obligatoire.
+- `apply_method` (`email` / `form` / `external`) ne sert plus à décider d'un envoi : il sert à **dire à l'utilisateur comment déposer**. C'est le « facilite d'y déposer » de la mission (§1).
+- Email trouvé → on l'affiche, avec un objet de message prêt à copier.
+- Sinon → on donne le lien direct (`apply_url`) vers le formulaire ou le site externe.
 
-### Envoi de l'email
+### Livraison du dossier à l'utilisateur
 
-- Expéditeur : `candidatures@<domaine>` avec **nom d'affichage = nom du candidat** → `Amadou Diallo <candidatures@domaine.sn>`
-- `Reply-To` = adresse email réelle du candidat. **Le recruteur doit pouvoir répondre directement au candidat, jamais au bot.**
-- Objet : reprendre l'intitulé exact du poste et, si présent, la référence de l'annonce.
-- Pièces jointes : `CV_Prenom_Nom.pdf` et `Lettre_Motivation_Prenom_Nom.pdf`. Jamais de .docx en pièce jointe.
-- **SPF, DKIM et DMARC configurés avant le premier envoi.** Montée en charge progressive (50 mails/jour la première semaine, doublement hebdomadaire). Sans ça, tout finit en spam et le produit ne vaut rien.
-- Traiter les bounces : webhook du provider → `applications.status = 'bounced'` → prévenir l'utilisateur et **ne pas décompter son quota**.
+Le bot n'envoie rien à un recruteur. Il remet à l'utilisateur, dans Telegram, de quoi déposer en moins d'une minute.
+
+- Deux fichiers : `CV_Prenom_Nom.pdf` et `Lettre_Motivation_Prenom_Nom.pdf`. **Jamais de .docx** — l'utilisateur doit pouvoir les transférer tels quels.
+- Le mode de dépôt, tiré de `apply_method` : adresse email à qui écrire, ou lien direct vers le formulaire.
+- Un objet de message prêt à copier : intitulé exact du poste + référence de l'annonce si elle existe.
+- Un rappel court : que le recruteur répondra à **son** adresse à lui, puisque c'est lui qui envoie.
+
+Ce que cette décision supprime, et qu'il ne faut pas réintroduire : domaine d'envoi, SPF/DKIM/DMARC, fournisseur SMTP transactionnel, montée en charge, gestion des bounces. Aucun de ces sujets n'existe plus.
 
 ---
 
@@ -329,9 +337,9 @@ Upload CV, parsing DeepSeek, validation par l'utilisateur, préférences.
 Matching, push 2x/jour, filtres, désabonnement.
 *Validation : un utilisateur test reçoit des offres pertinentes 2 jours de suite.*
 
-**Phase 4 — Génération + envoi (1,5 sem.)**
-CV adapté, lettre, rendu PDF, envoi email, mode brouillon, quotas.
-*Validation : 5 candidatures envoyées à une adresse de test, reçues en boîte de réception (pas en spam), avec Reply-To correct.*
+**Phase 4 — Génération des documents (1 sem.)**
+CV adapté, lettre, rendu PDF, remise du dossier dans Telegram avec le mode de dépôt, quotas.
+*Validation : 5 dossiers générés pour 5 offres réelles, PDF < 300 Ko, ouverts sans erreur sur un Android d'entrée de gamme, et chacun indiquant correctement où déposer.*
 
 **Phase 5 — Paiement (1 sem.)**
 Intégration agrégateur, webhook, cycle de vie de l'abonnement, relances, repli manuel.
@@ -359,11 +367,11 @@ Dashboard admin minimal (commandes Telegram suffisent), alertes sur scraper cass
 
 À poser dès la Phase 0, les réponses conditionnent le code :
 
-1. Nom de domaine et nom du produit (nécessaire pour SPF/DKIM avant Phase 4). — **`jobbot` retenu à titre PROVISOIRE le 2026-08-26.** Domaine non choisi : bloque la Phase 4.
+1. Nom de domaine et nom du produit. — **`jobbot` retenu à titre PROVISOIRE le 2026-08-26.** **Ne bloque plus la Phase 4** depuis la décision du 2026-09-08 : sans envoi d'email, il n'y a ni SPF ni DKIM à configurer.
 2. Agrégateur mobile money retenu et grille de frais réelle. — ouvert
 3. Statut juridique de la structure (nécessaire pour ouvrir un compte marchand). — ouvert
 4. Politique de confidentialité : les CV sont des données personnelles. Durée de conservation, suppression sur demande, commande `/supprimer_mes_donnees` à prévoir. — ouvert
-5. Adresse email de l'utilisateur : collectée à l'onboarding ou déduite du CV ? (Impact direct sur le Reply-To.) — **défaut appliqué en Phase 0** : `users.email` nullable, déduit du CV en Phase 2, confirmé par l'utilisateur avant le premier envoi. À reconfirmer.
+5. Adresse email de l'utilisateur. — **Sans objet depuis le 2026-09-08** : le bot n'envoie plus rien, il n'y a plus de Reply-To. `users.email` reste nullable et utile pour pré-remplir le CV, rien de plus.
 
 ---
 
