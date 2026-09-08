@@ -65,7 +65,9 @@ def construire_client(classe: type[BaseScraper], settings: Settings) -> PoliteCl
     return PoliteClient(
         httpx.AsyncClient(timeout=TIMEOUT_HTTP, follow_redirects=True),
         user_agent=settings.scraper_user_agent,
-        delai=settings.scraper_delay_seconds,
+        # Le réglage global est un plancher ; une source dont la reconnaissance
+        # a validé un rythme plus lent garde le sien (§7).
+        delai=max(settings.scraper_delay_seconds, classe.delai_minimum),
         horloge=time.monotonic,
         dormir=asyncio.sleep,
         # Plancher : tient même si le robots.txt du site est injoignable (§7).

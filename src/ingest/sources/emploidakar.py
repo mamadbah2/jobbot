@@ -162,6 +162,9 @@ class EmploiDakarScraper(BaseScraper):
     domaine = DOMAINE
     url_robots = URL_ROBOTS
     chemins_interdits = CHEMINS_INTERDITS
+    # Rythme validé par la reconnaissance du 2026-09-01 : 5 à 8 s (§7). C'est
+    # au-dessus du plancher général de §2.4, donc au-dessus du réglage global.
+    delai_minimum = 5.0
 
     async def fetch_list(self, page: int) -> PageListe:
         """Une page de liste, servie par WP Job Manager en AJAX (§7)."""

@@ -154,6 +154,11 @@ class PoliteClient:
         self._dernier_appel: dict[str, float] = {}
 
     @property
+    def delai(self) -> float:
+        """Délai appliqué entre deux requêtes d'un même domaine (§2.4)."""
+        return self._delai
+
+    @property
     def user_agent(self) -> str:
         """Agent annoncé au site : c'est pour lui que robots.txt est interprété."""
         return self._user_agent
@@ -257,6 +262,9 @@ class BaseScraper(ABC):
     url_robots: ClassVar[str]
     #: Plancher en dur, appliqué même si `robots.txt` est injoignable (§7).
     chemins_interdits: ClassVar[tuple[str, ...]] = ()
+    #: Délai minimal propre à la source, quand la reconnaissance en a validé un
+    #: plus élevé que le réglage global (§7). 0 = on garde le réglage global.
+    delai_minimum: ClassVar[float] = 0.0
     #: Garde-fou : une pagination folle ne doit pas marteler le site (§2.4).
     pages_max: ClassVar[int] = 50
 

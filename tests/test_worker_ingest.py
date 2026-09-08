@@ -13,6 +13,7 @@ from typing import Any
 
 from structlog.testing import capture_logs
 
+from src.config import get_settings
 from src.ingest.base import (
     BaseScraper,
     JobDetail,
@@ -22,8 +23,9 @@ from src.ingest.base import (
     ResultatPasse,
     StructureInattendueError,
 )
+from src.ingest.sources.emploidakar import EmploiDakarScraper
 from src.ingest.store import ResultatEcriture
-from src.worker_ingest import ingerer_source
+from src.worker_ingest import construire_client, ingerer_source
 
 
 def _offre(identifiant: str, *, email: str | None = None) -> OffreComplete:
@@ -101,6 +103,24 @@ class AlerteFactice:
 
     async def envoyer(self, evenement: str, **contexte: Any) -> None:
         self.envoyees.append((evenement, contexte))
+
+
+def test_le_client_annonce_un_user_agent_identifiable() -> None:
+    """§2, interdiction n°4 : jamais de User-Agent de navigateur usurpé."""
+    client = construire_client(EmploiDakarScraper, get_settings())
+    assert client.user_agent == get_settings().scraper_user_agent
+    assert "mozilla" not in client.user_agent.lower()
+
+
+def test_le_delai_respecte_le_plancher_de_la_source() -> None:
+    """§7 : le rythme validé sur emploidakar est de 5 à 8 s, pas les 4 s par défaut."""
+    settings = get_settings()
+    assert settings.scraper_delay_seconds < EmploiDakarScraper.delai_minimum
+    assert construire_client(EmploiDakarScraper, settings).delai >= 5.0
+
+
+def test_une_source_sans_plancher_garde_le_delai_configure() -> None:
+    assert construire_client(ScraperDouble, get_settings()).delai == 4.0
 
 
 async def test_alimente_la_pagination_avec_les_offres_deja_en_base() -> None:
