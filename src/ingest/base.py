@@ -35,6 +35,8 @@ class JobDetail:
     posted_at: datetime | None = None
     apply_email: str | None = None
     apply_method: str = "form"
+    # URL de candidature sur un site tiers, conservée pour le mode brouillon (§2.1).
+    apply_url: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

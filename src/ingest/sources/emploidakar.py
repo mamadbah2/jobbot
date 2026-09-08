@@ -11,6 +11,7 @@ from __future__ import annotations
 import re
 from datetime import UTC, datetime
 from typing import Any
+from urllib.parse import urlsplit
 
 from selectolax.parser import HTMLParser, Node
 
@@ -85,10 +86,48 @@ def parse_detail(html: str) -> JobDetail:
         except ValueError:
             publiee_le = None
 
-    email = extract_apply_email(description, DOMAINE)
+    mailto, lien_externe = _methode_declaree(arbre)
+    email = mailto or extract_apply_email(description, DOMAINE)
+
+    if email:
+        # Un email explicite prime : y écrire est exactement ce que le recruteur
+        # demande, et c'est la seule voie où l'auto-submit apporte sa valeur.
+        methode = "email"
+    elif lien_externe:
+        # Site tiers, souvent à login : mode brouillon obligatoire (§2.1).
+        methode = "external"
+    else:
+        methode = "form"
+
     return JobDetail(
         description=description,
         posted_at=publiee_le,
         apply_email=email,
-        apply_method="email" if email else "form",
+        apply_method=methode,
+        apply_url=lien_externe,
     )
+
+
+def _methode_declaree(arbre: HTMLParser) -> tuple[str | None, str | None]:
+    """Lit `div.application_details` : (email de candidature, lien externe).
+
+    Ce bloc porte la consigne du recruteur et vit hors de la description.
+    Un lien vers le portail lui-même n'est pas une candidature externe.
+    """
+    bloc = arbre.css_first("div.application_details")
+    if bloc is None:
+        return None, None
+
+    mailto: str | None = None
+    lien_externe: str | None = None
+    for ancre in bloc.css("a[href]"):
+        href = (ancre.attributes.get("href") or "").strip()
+        if href.lower().startswith("mailto:"):
+            adresse = href[len("mailto:") :].split("?", 1)[0]
+            # Repasse par les rejets de §7 (boîtes non humaines, domaine du portail).
+            mailto = mailto or extract_apply_email(adresse, DOMAINE)
+        elif href.lower().startswith(("http://", "https://")):
+            hote = urlsplit(href).netloc.lower().removeprefix("www.")
+            if hote != DOMAINE and lien_externe is None:
+                lien_externe = href
+    return mailto, lien_externe

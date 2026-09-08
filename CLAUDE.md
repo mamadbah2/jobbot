@@ -127,6 +127,8 @@ jobbot/
 │   │   │   ├── novojob.py
 │   │   │   └── reliefweb.py   # API officielle, sans risque de casse
 │   │   ├── normalize.py       # nettoyage + extraction email de contact
+│   │   ├── pagination.py      # politique de pagination incrémentale
+│   │   ├── robots.py          # lecture de robots.txt (robotparser inutilisable, cf §7)
 │   │   └── dedupe.py
 │   ├── llm/
 │   │   ├── client.py          # wrapper DeepSeek + retry + compteur de coût
