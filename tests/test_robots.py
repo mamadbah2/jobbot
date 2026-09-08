@@ -110,3 +110,26 @@ def test_sur_le_robots_txt_reel_complet() -> None:
     assert regles.autorise(f"{base}/resume/quelquun") is False
     assert regles.autorise(f"{base}/CV/quelquun") is False
     assert regles.autorise(f"{base}/wp-content/uploads/job_applications/a.pdf") is False
+
+
+def test_un_motif_hostile_ne_fige_pas_le_worker() -> None:
+    """Le robots.txt vient du site : il ne doit jamais pouvoir bloquer la passe.
+
+    Avec une traduction naïve en regex, ce motif provoquait un recul
+    catastrophique (facteur ~4 par caractère : 8 s à 30 caractères, plusieurs
+    minutes à 34). Le worker tourne avec `max_instances=1` : il ne repartait
+    jamais.
+    """
+    import time
+
+    regles = ReglesRobots.analyser("User-agent: *\nDisallow: /" + "a*" * 20 + "b\n", UA)
+    debut = time.monotonic()
+    regles.autorise("https://s.sn/" + "a" * 36)
+    assert time.monotonic() - debut < 1.0
+
+
+def test_le_motif_hostile_reste_correctement_evalue() -> None:
+    """La protection ne doit pas se payer par un résultat faux."""
+    regles = ReglesRobots.analyser("User-agent: *\nDisallow: /aa*bb\n", UA)
+    assert regles.autorise("https://s.sn/aaXXbbYY") is False
+    assert regles.autorise("https://s.sn/aaXXcc") is True
