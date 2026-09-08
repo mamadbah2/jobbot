@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from abc import ABC, abstractmethod
 from collections.abc import Awaitable, Callable
 from collections.abc import Set as AbstractSet
@@ -98,6 +99,10 @@ class SourceBloqueeError(RuntimeError):
     """Le site a opposé un challenge anti-bot (CLAUDE.md §2 interdiction n°4)."""
 
 
+# Un « // » en tête de chemin n'est pas replié par httpx et contournerait
+# une liste noire écrite avec un seul slash.
+_NORMALISER_SLASHS = re.compile(r"/{2,}")
+
 # Statuts sous lesquels Cloudflare sert son interstitiel.
 _STATUTS_SUSPECTS = frozenset({403, 429, 503})
 
@@ -143,7 +148,16 @@ class PoliteClient:
         dormir: Callable[[float], Awaitable[None]],
         chemins_interdits: tuple[str, ...] = (),
         regles: ReglesRobots | None = None,
+        hotes_autorises: frozenset[str] = frozenset(),
     ) -> None:
+        if client.follow_redirects:
+            # Une redirection est décidée par un en-tête du site : elle échappe
+            # au contrôle de chemin, à robots.txt et au délai de §2.4, qui ne
+            # s'appliquent qu'avant l'appel. Refus structurel.
+            raise ValueError(
+                "PoliteClient refuse un client qui suit les redirection(s) : "
+                "les sauts échappent aux garde-fous de §2.4"
+            )
         self._client = client
         self._user_agent = user_agent
         self._delai = delai
@@ -151,6 +165,7 @@ class PoliteClient:
         self._dormir = dormir
         self._chemins_interdits = tuple(c.lower() for c in chemins_interdits)
         self._regles = regles
+        self._hotes_autorises = frozenset(h.lower().removeprefix("www.") for h in hotes_autorises)
         self._dernier_appel: dict[str, float] = {}
 
     @property
@@ -168,7 +183,15 @@ class PoliteClient:
         self._regles = regles
 
     def _verifier_chemin(self, url: str) -> None:
-        chemin = urlsplit(url).path.lower()
+        # On contrôle le chemin RÉELLEMENT émis : httpx résout « .. », « . » et
+        # l'encodage pourcent après nous. Contrôler l'URL brute laissait passer
+        # « /offre-demploi/x/../../resume/quelquun ».
+        cible = httpx.URL(url)
+        hote = cible.host.lower().removeprefix("www.")
+        if self._hotes_autorises and hote not in self._hotes_autorises:
+            raise CheminInterditError(f"hôte hors périmètre de la source : {url}")
+
+        chemin = _NORMALISER_SLASHS.sub("/", cible.path).lower()
         # Sans cette exception, on ne pourrait jamais relire robots.txt lui-même.
         if chemin == "/robots.txt":
             return

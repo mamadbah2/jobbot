@@ -196,3 +196,32 @@ async def test_alerte_sur_un_changement_de_structure_du_site() -> None:
     assert [e for e, _ in alerte.envoyees] == ["structure_inattendue"]
     assert any(e["log_level"] == "error" for e in journal)
     assert depot.ecrites == []
+
+
+# --- Configuration du client de production (§2.4) ---
+
+
+def test_le_client_de_production_ne_suit_pas_les_redirections() -> None:
+    """Aucun test ne figeait cette option : le client réel la contredisait."""
+    from src.config import Settings
+    from src.ingest.sources.emploidakar import EmploiDakarScraper
+    from src.worker_ingest import construire_client
+
+    settings = Settings(TELEGRAM_BOT_TOKEN="1:x")  # type: ignore[call-arg]
+    poli = construire_client(EmploiDakarScraper, settings)
+    assert poli._client.follow_redirects is False
+
+
+async def test_le_client_de_production_refuse_un_hote_etranger() -> None:
+    """Les URL d'annonces sortent d'un href du site : périmètre verrouillé."""
+    import pytest
+
+    from src.config import Settings
+    from src.ingest.base import CheminInterditError
+    from src.ingest.sources.emploidakar import EmploiDakarScraper
+    from src.worker_ingest import construire_client
+
+    settings = Settings(TELEGRAM_BOT_TOKEN="1:x")  # type: ignore[call-arg]
+    poli = construire_client(EmploiDakarScraper, settings)
+    with pytest.raises(CheminInterditError):
+        await poli.get("https://collecteur-externe.example/exfiltration?d=1")

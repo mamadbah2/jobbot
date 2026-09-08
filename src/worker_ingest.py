@@ -63,7 +63,10 @@ class BilanSource:
 def construire_client(classe: type[BaseScraper], settings: Settings) -> PoliteClient:
     """Client HTTP poli, propre à une source (§2, interdiction n°4)."""
     return PoliteClient(
-        httpx.AsyncClient(timeout=TIMEOUT_HTTP, follow_redirects=True),
+        # Surtout pas de redirection : le saut est décidé par un en-tête du
+        # site et échapperait au contrôle de chemin, à robots.txt et au délai
+        # de §2.4, tous appliqués avant l'appel.
+        httpx.AsyncClient(timeout=TIMEOUT_HTTP, follow_redirects=False),
         user_agent=settings.scraper_user_agent,
         # Le réglage global est un plancher ; une source dont la reconnaissance
         # a validé un rythme plus lent garde le sien (§7).
@@ -72,6 +75,9 @@ def construire_client(classe: type[BaseScraper], settings: Settings) -> PoliteCl
         dormir=asyncio.sleep,
         # Plancher : tient même si le robots.txt du site est injoignable (§7).
         chemins_interdits=classe.chemins_interdits,
+        # Les URL d'annonces proviennent d'un href du site : sans périmètre,
+        # un lien hostile ferait sortir le scraper du domaine (§2.4).
+        hotes_autorises=frozenset({classe.domaine}),
     )
 
 
