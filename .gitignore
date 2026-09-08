@@ -11,3 +11,4 @@ __pycache__/
 htmlcov/
 .coverage
 data/
+.claude/worktrees/
