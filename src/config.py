@@ -64,6 +64,13 @@ class Settings(BaseSettings):
     max_applications_per_job: int = Field(default=15, ge=1)
 
     # --- Scraping (CLAUDE.md §2, interdiction n°4) ---
+    # Rafraîchissement à la demande, déclenché par une visite (§7).
+    # La fraîcheur se mesure à la dernière passe RÉUSSIE, pas à la date de la
+    # dernière offre : sinon un jour sans publication relance une passe à
+    # chaque visite. Le verrou garantit une seule passe concurrente (§2.4).
+    ingest_fraicheur_minutes: int = Field(default=30, ge=1)
+    ingest_verrou_secondes: int = Field(default=600, ge=60)
+
     scraper_user_agent: str = "JobBotSN/0.1 (+contact: admin@example.sn)"
     scraper_delay_seconds: float = Field(default=4.0, ge=3.0)
 

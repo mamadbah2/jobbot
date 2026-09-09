@@ -27,6 +27,7 @@ from src.ingest.base import (
     StructureInattendueError,
     scraper_semble_casse,
 )
+from src.ingest.fraicheur import CacheRedis, Decision, rafraichir_si_necessaire
 from src.ingest.sources.emploidakar import EmploiDakarScraper
 from src.ingest.store import DepotOffres, DepotSql
 from src.logging_setup import get_logger, setup_logging
@@ -180,3 +181,34 @@ async def main() -> None:
 if __name__ == "__main__":
     with contextlib.suppress(KeyboardInterrupt):
         asyncio.run(main())
+
+
+async def rafraichir_a_la_demande(cache: CacheRedis) -> dict[str, Decision]:
+    """Point d'entrée du bot : appelé quand un utilisateur ouvre la plateforme.
+
+    Ne bloque jamais l'appelant. Le bot sert les offres déjà en base, et cette
+    fonction déclenche au besoin une passe de fond — au plus une à la fois par
+    source, grâce au verrou Redis (§2.4).
+    """
+    settings = get_settings()
+    decisions: dict[str, Decision] = {}
+    for classe in SOURCES:
+
+        async def passe(classe: type[BaseScraper] = classe) -> None:
+            client = construire_client(classe, settings)
+            try:
+                async with session_scope() as session:
+                    await ingerer_source(
+                        classe(client), DepotSql(session), construire_alerte(settings)
+                    )
+            finally:
+                await client.aclose()
+
+        decisions[classe.source] = await rafraichir_si_necessaire(
+            cache,
+            classe.source,
+            fraicheur_secondes=settings.ingest_fraicheur_minutes * 60,
+            duree_verrou_secondes=settings.ingest_verrou_secondes,
+            executer_passe=passe,
+        )
+    return decisions
