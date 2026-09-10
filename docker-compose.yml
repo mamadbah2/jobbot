@@ -14,6 +14,11 @@ x-app: &app
 services:
   postgres:
     image: postgres:16-alpine
+    # Exposé UNIQUEMENT sur la boucle locale, pour les clients graphiques de dev.
+    # Ne jamais reproduire tel quel sur le VPS : en production, la base ne doit
+    # être joignable que depuis le réseau interne de Compose.
+    ports:
+      - "127.0.0.1:${POSTGRES_HOST_PORT:-55432}:5432"
     environment:
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
