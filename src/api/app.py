@@ -18,6 +18,7 @@ from src.core.erreurs import (
     ErreurMetier,
     InscriptionIncomplete,
     JetonInvalide,
+    LiaisonIndisponible,
     NomInvalide,
     NumeroInvalide,
     PlafondGlobalAtteint,
@@ -50,6 +51,7 @@ _STATUTS: dict[type[ErreurMetier], int] = {
     JetonInvalide: status.HTTP_401_UNAUTHORIZED,
     CompteInexistant: status.HTTP_404_NOT_FOUND,
     EnvoiImpossible: status.HTTP_503_SERVICE_UNAVAILABLE,
+    LiaisonIndisponible: status.HTTP_503_SERVICE_UNAVAILABLE,
 }
 
 

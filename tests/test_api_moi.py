@@ -9,11 +9,15 @@ réutilise sans les recopier (amendement 2, tâche 14).
 
 from __future__ import annotations
 
+from typing import Any
+from urllib.parse import parse_qs, urlparse
+
 import pytest
 from fastapi.testclient import TestClient
 
+from src.api.routers import moi
 from src.config import get_settings
-from tests.conftest import FournisseurCourrielEspion, demander_code_verification
+from tests.conftest import FauxCache, FournisseurCourrielEspion, demander_code_verification
 
 ADRESSE = "fatou@jobbot-test.sn"
 TEL = "+221771234567"
@@ -21,6 +25,28 @@ TEL = "+221771234567"
 
 def _code(client: TestClient, espion: FournisseurCourrielEspion, adresse: str = ADRESSE) -> str:
     return demander_code_verification(client, espion, adresse)
+
+
+class AlerteEspionne:
+    """Capture les alertes admin, sans en émettre nulle part (round de
+    correction 1, tâche 14) — même forme que celle de
+    `tests/test_api_auth_demande.py`, non partagée : un seul appelant chacune."""
+
+    def __init__(self) -> None:
+        self.alertes: list[tuple[str, dict[str, Any]]] = []
+
+    async def envoyer(self, evenement: str, **contexte: Any) -> None:
+        self.alertes.append((evenement, contexte))
+
+
+def _connecter(
+    client: TestClient, espion: FournisseurCourrielEspion, adresse: str = ADRESSE
+) -> None:
+    code = _code(client, espion, adresse)
+    client.post(
+        "/auth/code/verifie",
+        json={"email": adresse, "code": code, "telephone": TEL, "nom_complet": "Fatou"},
+    )
 
 
 @pytest.mark.integration
@@ -97,3 +123,46 @@ def test_jeton_de_liaison_telegram(
 @pytest.mark.integration
 def test_jeton_de_liaison_exige_une_session(client_auth: TestClient) -> None:
     assert client_auth.post("/moi/telegram/jeton").status_code == 401
+
+
+@pytest.mark.integration
+def test_jeton_de_liaison_sans_bot_configure_refuse_et_alerte(
+    client_auth: TestClient, fournisseur_courriel_espion: FournisseurCourrielEspion
+) -> None:
+    """`TELEGRAM_BOT_USERNAME` vide (défaut) doit refuser bruyamment, pas
+    produire un lien `https://t.me/?start=...` silencieusement mort
+    (round de correction 1)."""
+    assert get_settings().telegram_bot_username == ""
+    espionnee = AlerteEspionne()
+    client_auth.app.dependency_overrides[moi.alerte] = lambda: espionnee  # type: ignore[attr-defined]
+
+    _connecter(client_auth, fournisseur_courriel_espion)
+    r = client_auth.post("/moi/telegram/jeton")
+
+    assert r.status_code == 503
+    assert r.json()["erreur"] == "liaison_indisponible"
+    assert espionnee.alertes == [("telegram_bot_username_absent", {})]
+
+
+@pytest.mark.integration
+def test_jeton_de_liaison_perime_le_precedent(
+    client_auth: TestClient,
+    fournisseur_courriel_espion: FournisseurCourrielEspion,
+    faux_cache: FauxCache,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Un seul jeton de liaison valide à la fois : en redemander un périme
+    l'ancien (round de correction 1)."""
+    monkeypatch.setenv("TELEGRAM_BOT_USERNAME", "jobbot_sn_bot")
+    get_settings.cache_clear()
+    _connecter(client_auth, fournisseur_courriel_espion)
+
+    def _jeton_du_lien(lien: str) -> str:
+        return parse_qs(urlparse(lien).query)["start"][0]
+
+    premier = _jeton_du_lien(client_auth.post("/moi/telegram/jeton").json()["lien"])
+    second = _jeton_du_lien(client_auth.post("/moi/telegram/jeton").json()["lien"])
+
+    assert premier != second
+    assert f"jobbot:auth:liaison:{premier}" not in faux_cache.valeurs
+    assert f"jobbot:auth:liaison:{second}" in faux_cache.valeurs

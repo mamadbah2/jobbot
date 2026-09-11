@@ -23,6 +23,7 @@ __all__ = [
     "NomInvalide",
     "TelegramDejaLie",
     "EnvoiImpossible",
+    "LiaisonIndisponible",
 ]
 
 
@@ -106,3 +107,10 @@ class EnvoiImpossible(ErreurMetier):
     """Le fournisseur d'email a échoué. L'utilisateur peut réessayer."""
 
     code = "envoi_impossible"
+
+
+class LiaisonIndisponible(ErreurMetier):
+    """Le lien de liaison Telegram ne peut pas être construit : le nom du bot
+    n'est pas configuré."""
+
+    code = "liaison_indisponible"

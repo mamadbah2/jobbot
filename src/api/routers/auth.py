@@ -16,7 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.alerting import AlerteAdmin, construire_alerte
 from src.api import deps
 from src.api.schemas.auth import DemandeCode, Utilisateur, VerificationCode
-from src.config import Settings, get_settings
+from src.config import Settings
 from src.core import courriel_valide
 from src.core.auth import cles, codes, comptes, jetons
 from src.core.auth.limites import (
@@ -36,18 +36,14 @@ log = get_logger(__name__)
 router = APIRouter(prefix="/auth", tags=["auth"])
 
 
-def reglages() -> Settings:
-    return get_settings()
-
-
 def fournisseur(
-    settings: Annotated[Settings, Depends(reglages)],
+    settings: Annotated[Settings, Depends(deps.reglages)],
 ) -> FournisseurCourriel:
     """Surchargeable dans les tests, pour ne jamais rien envoyer."""
     return construire_fournisseur(settings)
 
 
-def alerte(settings: Annotated[Settings, Depends(reglages)]) -> AlerteAdmin:
+def alerte(settings: Annotated[Settings, Depends(deps.reglages)]) -> AlerteAdmin:
     return construire_alerte(settings)
 
 
@@ -74,7 +70,7 @@ async def demander_code(
     request: Request,
     response: Response,
     cache: Annotated[CacheRedis, Depends(deps.cache_redis)],
-    settings: Annotated[Settings, Depends(reglages)],
+    settings: Annotated[Settings, Depends(deps.reglages)],
     envoi: Annotated[FournisseurCourriel, Depends(fournisseur)],
     canal_alerte: Annotated[AlerteAdmin, Depends(alerte)],
 ) -> None:
@@ -161,7 +157,7 @@ async def verifier_code(
     response: Response,
     session: Annotated[AsyncSession, Depends(deps.session_db)],
     cache: Annotated[CacheRedis, Depends(deps.cache_redis)],
-    settings: Annotated[Settings, Depends(reglages)],
+    settings: Annotated[Settings, Depends(deps.reglages)],
 ) -> Utilisateur:
     """Inscrit ou connecte. Un seul endpoint pour les deux cas (spec §8)."""
     secret_brut = settings.jwt_secret.get_secret_value()
@@ -221,8 +217,19 @@ async def deconnexion(
     response: Response,
     utilisateur: Annotated[User, Depends(deps.utilisateur_courant)],
     session: Annotated[AsyncSession, Depends(deps.session_db)],
-    settings: Annotated[Settings, Depends(reglages)],
+    settings: Annotated[Settings, Depends(deps.reglages)],
 ) -> None:
     """Invalide TOUS les jetons du compte, pas seulement celui-ci (spec §5)."""
     await comptes.revoquer_jetons(session, utilisateur)
-    response.delete_cookie(settings.cookie_session_nom, path="/")
+    # `secure` et `samesite` doivent reprendre ceux posés par `poser_cookie` :
+    # un navigateur n'efface le cookie que si les attributs correspondent,
+    # sinon un cookie fantôme reste (round de correction 1, tâche 14). Sans
+    # conséquence de sécurité ici — la révocation tient à `token_version`,
+    # pas à la suppression du cookie.
+    response.delete_cookie(
+        settings.cookie_session_nom,
+        path="/",
+        httponly=True,
+        samesite="lax",
+        secure=settings.cookie_session_secure,
+    )

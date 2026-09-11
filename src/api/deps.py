@@ -17,6 +17,15 @@ from src.db.models import User
 from src.db.session import session_scope
 
 
+def reglages() -> Settings:
+    """Réglages courants, injectables par FastAPI (partagé entre routers).
+
+    Centralisé ici pour ne pas dupliquer cette même ligne dans chaque router
+    (round de correction 1, tâche 14).
+    """
+    return get_settings()
+
+
 async def session_db() -> AsyncIterator[AsyncSession]:
     """Session transactionnelle : commit en sortie normale, rollback sur exception."""
     async with session_scope() as session:
