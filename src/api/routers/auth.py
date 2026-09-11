@@ -100,7 +100,12 @@ async def demander_code(
         # les utilisateurs ne se plaignent. Les compteurs déjà consommés ne
         # sont PAS remboursés : l'utilisateur réessaiera après le cooldown.
         await canal_alerte.envoyer("envoi_courriel_echoue", domaine=adresse.rsplit("@", 1)[-1])
-        log.error("envoi_courriel_echoue", erreur=str(exc))
+        # Le message brut du fournisseur n'est PAS journalisé : une erreur SMTP
+        # embarque couramment le destinataire (« 550 no such user <adresse> »),
+        # ce qui ferait fuiter une donnée personnelle dans les logs (§14.4).
+        # La classe de l'exception suffit à distinguer une panne de connexion
+        # d'un rejet ; le détail par message vit chez le fournisseur.
+        log.error("envoi_courriel_echoue", type_erreur=type(exc).__name__)
         raise EnvoiImpossible(EnvoiImpossible.code) from exc
 
     # Jamais le code, jamais l'adresse en clair : ce log sert au suivi des

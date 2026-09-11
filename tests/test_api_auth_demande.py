@@ -7,6 +7,7 @@ from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
+from structlog.testing import capture_logs
 
 from src.api import deps
 from src.api.app import create_app
@@ -26,6 +27,15 @@ class FournisseurEnPanne:
 
     async def envoyer_code(self, destinataire: str, code: str) -> None:
         raise RuntimeError("SMTP indisponible")
+
+
+class FournisseurEnPanneAvecAdresseDansLeMessage:
+    """Un fournisseur SMTP réel embarque souvent le destinataire dans son
+    message d'erreur (round de correction 2) : « 550 no such user <adresse> »
+    est un format de rejet courant."""
+
+    async def envoyer_code(self, destinataire: str, code: str) -> None:
+        raise RuntimeError(f"550 no such user <{destinataire}>")
 
 
 class AlerteEspionne:
@@ -121,3 +131,30 @@ def test_envoi_impossible_renvoie_503_et_alerte(faux_cache: FauxCache) -> None:
     evenement, contexte = alerte_espionnee.alertes[0]
     assert evenement == "envoi_courriel_echoue"
     assert contexte == {"domaine": "example.sn"}
+
+
+def test_message_erreur_fournisseur_jamais_journalise(faux_cache: FauxCache) -> None:
+    """Round de correction 2 : un message d'erreur SMTP embarque couramment le
+    destinataire (« 550 no such user <adresse> »). Verrouille la régression du
+    round de correction 1, où `str(exc)` avait été journalisé tel quel."""
+    from src.api.routers import auth
+
+    app = create_app()
+    adresse = "fatou@jobbot-test.sn"
+
+    async def _cache() -> Any:
+        yield faux_cache
+
+    app.dependency_overrides[deps.cache_redis] = _cache
+    app.dependency_overrides[auth.fournisseur] = (
+        lambda: FournisseurEnPanneAvecAdresseDansLeMessage()
+    )
+    app.dependency_overrides[auth.alerte] = lambda: AlerteEspionne()
+
+    with capture_logs() as journal, TestClient(app, raise_server_exceptions=False) as c:
+        reponse = c.post("/auth/code/demande", json={"email": adresse})
+
+    assert reponse.status_code == 503
+    assert adresse not in reponse.text
+    for entree in journal:
+        assert adresse not in repr(entree)
