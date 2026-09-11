@@ -20,6 +20,8 @@ __all__ = [
     "TelephoneDejaUtilise",
     "ContactUsurpe",
     "JetonInvalide",
+    "NomInvalide",
+    "TelegramDejaLie",
 ]
 
 
@@ -87,3 +89,13 @@ class ContactUsurpe(ErreurMetier):
 
 class JetonInvalide(ErreurMetier):
     code = "jeton_invalide"
+
+
+class NomInvalide(ErreurMetier, ValueError):
+    code = "nom_invalide"
+
+
+class TelegramDejaLie(ErreurMetier):
+    """Cet identifiant Telegram est déjà rattaché à un autre compte."""
+
+    code = "telegram_deja_lie"

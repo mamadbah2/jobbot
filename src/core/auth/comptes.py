@@ -13,14 +13,18 @@ Deux règles portent tout le reste :
 from __future__ import annotations
 
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core import courriel_valide, telephone
 from src.core.erreurs import (
     CompteInexistant,
     InscriptionIncomplete,
+    NomInvalide,
+    TelegramDejaLie,
     TelephoneDejaUtilise,
 )
+from src.core.saisie import texte_saisi
 from src.db.models import User
 
 
@@ -57,18 +61,35 @@ async def connecter_ou_inscrire(
     if existant is not None:
         return existant
 
-    if not telephone_saisi or not nom_complet or not nom_complet.strip():
+    if not telephone_saisi or not nom_complet:
         raise InscriptionIncomplete(InscriptionIncomplete.code)
+
+    # `nom_complet` est une saisie utilisateur non fiable : borne de 255, taille
+    # de la colonne `users.full_name` (§5). Un type inattendu (int, liste) doit
+    # produire `NomInvalide`, jamais une `AttributeError` ni une `DataError`.
+    nom = texte_saisi(nom_complet, longueur_max=255, erreur=NomInvalide, sujet="nom")
 
     numero = telephone.normaliser(telephone_saisi)
     if await par_telephone(session, numero) is not None:
         raise TelephoneDejaUtilise(TelephoneDejaUtilise.code)
 
-    utilisateur = User(
-        email=normalisee, phone=numero, full_name=nom_complet.strip(), state="onboarding"
-    )
-    session.add(utilisateur)
-    await session.flush()
+    utilisateur = User(email=normalisee, phone=numero, full_name=nom, state="onboarding")
+    try:
+        # SAVEPOINT : seul l'INSERT est annulé en cas de course, pas toute la
+        # transaction extérieure (contrairement à un `session.rollback()`).
+        async with session.begin_nested():
+            session.add(utilisateur)
+            await session.flush()
+    except IntegrityError as exc:
+        # Course : une requête concurrente a créé le compte entre notre SELECT
+        # et notre INSERT. Fréquent quand l'utilisateur tape deux fois sur
+        # « Valider » sur une connexion instable (§11). La contrainte
+        # d'unicité nous rattrape ; on la traduit plutôt que de laisser
+        # remonter une IntegrityError, qui deviendrait une 500.
+        deja = await par_adresse(session, normalisee)
+        if deja is not None:
+            return deja
+        raise TelephoneDejaUtilise(TelephoneDejaUtilise.code) from exc
     return utilisateur
 
 
@@ -82,6 +103,11 @@ async def lier_telegram(session: AsyncSession, *, telephone_saisi: str, telegram
     utilisateur = await par_telephone(session, telephone_saisi)
     if utilisateur is None:
         raise CompteInexistant(CompteInexistant.code)
+
+    proprietaire = await par_telegram(session, telegram_id)
+    if proprietaire is not None and proprietaire.id != utilisateur.id:
+        raise TelegramDejaLie(TelegramDejaLie.code)
+
     utilisateur.telegram_id = telegram_id
     await session.flush()
     return utilisateur

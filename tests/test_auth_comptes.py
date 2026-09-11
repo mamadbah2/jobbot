@@ -17,7 +17,9 @@ from src.core.erreurs import (
     AdresseInvalide,
     CompteInexistant,
     InscriptionIncomplete,
+    NomInvalide,
     NumeroInvalide,
+    TelegramDejaLie,
     TelephoneDejaUtilise,
 )
 from src.db.models import User
@@ -163,3 +165,89 @@ async def test_revocation_incremente_la_version(session: AsyncSession) -> None:
     await comptes.revoquer_jetons(session, u)
     await session.commit()
     assert u.token_version == 1
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("nom_invalide", [12345, ["Fatou"]])
+async def test_nom_de_type_inattendu_leve_nom_invalide(
+    session: AsyncSession, nom_invalide: object
+) -> None:
+    """`core` est la frontière de confiance : un type inattendu doit lever une
+    erreur métier, jamais une AttributeError (donc une 500)."""
+    with pytest.raises(NomInvalide):
+        await comptes.connecter_ou_inscrire(
+            session,
+            adresse=ADRESSE,
+            telephone_saisi=TEL,
+            nom_complet=nom_invalide,  # type: ignore[arg-type]
+        )
+
+
+@pytest.mark.integration
+async def test_nom_trop_long_refuse_sans_creer_de_ligne(session: AsyncSession) -> None:
+    """256 caractères : au-delà de la colonne `users.full_name` (String(255))."""
+    with pytest.raises(NomInvalide):
+        await comptes.connecter_ou_inscrire(
+            session, adresse=ADRESSE, telephone_saisi=TEL, nom_complet="A" * 256
+        )
+    await session.commit()
+    assert await comptes.par_adresse(session, ADRESSE) is None
+
+
+@pytest.mark.integration
+async def test_nom_de_longueur_maximale_accepte(session: AsyncSession) -> None:
+    """255 caractères exactement : la borne, pas au-delà."""
+    u = await comptes.connecter_ou_inscrire(
+        session, adresse=ADRESSE, telephone_saisi=TEL, nom_complet="A" * 255
+    )
+    assert u.full_name == "A" * 255
+
+
+@pytest.mark.integration
+async def test_liaison_telegram_deja_rattache_a_un_autre_compte(session: AsyncSession) -> None:
+    autre_tel = "+221779999998"
+    await comptes.connecter_ou_inscrire(
+        session, adresse=ADRESSE, telephone_saisi=TEL, nom_complet="Fatou"
+    )
+    await comptes.connecter_ou_inscrire(
+        session, adresse="autre@jobbot-test.sn", telephone_saisi=autre_tel, nom_complet="Autre"
+    )
+    await session.commit()
+    await comptes.lier_telegram(session, telephone_saisi=TEL, telegram_id=555)
+    await session.commit()
+    with pytest.raises(TelegramDejaLie):
+        await comptes.lier_telegram(session, telephone_saisi=autre_tel, telegram_id=555)
+
+
+@pytest.mark.integration
+async def test_course_a_l_inscription_traduite(
+    session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Double clic sur « Valider » sur une connexion instable (§11) : la
+    deuxième requête doit retrouver le compte, jamais laisser fuir
+    l'IntegrityError de la contrainte d'unicité sur `email`."""
+    cree = await comptes.connecter_ou_inscrire(
+        session, adresse=ADRESSE, telephone_saisi=TEL, nom_complet="Fatou"
+    )
+    await session.commit()
+
+    original_par_adresse = comptes.par_adresse
+    appels = {"n": 0}
+
+    async def par_adresse_en_retard(s: AsyncSession, adresse: str) -> User | None:
+        appels["n"] += 1
+        if appels["n"] == 1:
+            # Simule le SELECT d'une requête concurrente qui n'a pas encore vu
+            # la ligne créée par `cree` ci-dessus.
+            return None
+        return await original_par_adresse(s, adresse)
+
+    monkeypatch.setattr(comptes, "par_adresse", par_adresse_en_retard)
+
+    # Numéro différent pour isoler la collision sur `email` de celle sur
+    # `phone` (déjà couverte par `test_telephone_deja_pris_par_un_autre_compte`).
+    retrouve = await comptes.connecter_ou_inscrire(
+        session, adresse=ADRESSE, telephone_saisi="+221779999997", nom_complet="Fatou"
+    )
+    assert retrouve.id == cree.id
+    assert retrouve.phone == TEL  # le numéro d'origine n'a pas été écrasé
