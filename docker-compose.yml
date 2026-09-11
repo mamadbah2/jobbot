@@ -50,9 +50,9 @@ services:
     command: ["alembic", "upgrade", "head"]
     restart: "no"
 
-  bot:
+  api:
     <<: *app
-    command: ["python", "-m", "src.bot.main"]
+    command: ["python", "-m", "src.api.main"]
     ports:
       - "${HTTP_PORT:-8080}:${HTTP_PORT:-8080}"
     depends_on:
@@ -68,6 +68,33 @@ services:
       timeout: 10s
       retries: 5
       start_period: 20s
+
+  bot:
+    <<: *app
+    command: ["python", "-m", "src.bot.main"]
+    # Plus de `ports` ni de `healthcheck` : depuis le 2026-09-11 le bot ne sert
+    # plus de HTTP, c'est le service `api` qui porte /health (CLAUDE.md §4).
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+
+  # Client Next.js. L'image est construite par le plan « client web » ;
+  # `web/Dockerfile` n'existe pas encore, donc ce service ne démarre pas tant
+  # que ce plan n'est pas exécuté. Déclaré ici pour que l'architecture du §4
+  # soit lisible dans un seul fichier.
+  web:
+    build:
+      context: ./web
+    env_file: .env
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+    profiles: ["web"]
 
   worker_ingest:
     <<: *app
