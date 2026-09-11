@@ -76,6 +76,22 @@ def test_jwt_secret_absent_tolere_en_dev(monkeypatch: pytest.MonkeyPatch) -> Non
     assert settings.jwt_secret.get_secret_value()  # secret éphémère généré
 
 
+def test_jwt_secret_trop_court_refuse_en_prod(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Amendement tâche 5 : un secret court se retrouve par force brute."""
+    monkeypatch.setenv("ENVIRONMENT", "prod")
+    monkeypatch.setenv("JWT_SECRET", "trop_court")
+    get_settings.cache_clear()
+    with pytest.raises(ValidationError):
+        get_settings()
+
+
+def test_jwt_secret_de_32_caracteres_accepte_en_prod(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("ENVIRONMENT", "prod")
+    monkeypatch.setenv("JWT_SECRET", "a" * 32)
+    get_settings.cache_clear()
+    assert get_settings().jwt_secret.get_secret_value() == "a" * 32
+
+
 def test_garde_fous_auth_valeurs_par_defaut() -> None:
     settings = get_settings()
     assert settings.code_ttl_secondes == 300
@@ -93,7 +109,7 @@ def test_cookie_secure_suit_l_environnement(monkeypatch: pytest.MonkeyPatch) -> 
     get_settings.cache_clear()
     assert get_settings().cookie_session_secure is False
     monkeypatch.setenv("ENVIRONMENT", "prod")
-    monkeypatch.setenv("JWT_SECRET", "secret_de_test")
+    monkeypatch.setenv("JWT_SECRET", "secret_de_test_avec_trente_deux_caracteres_ou_plus")
     get_settings.cache_clear()
     assert get_settings().cookie_session_secure is True
 

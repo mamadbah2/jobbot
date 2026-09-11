@@ -119,17 +119,29 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def _exiger_un_secret_en_prod(self) -> Settings:
-        """En prod, un secret vide permettrait de forger n'importe quel jeton."""
-        if self.jwt_secret.get_secret_value():
+        """En prod, un secret vide ou trop court permettrait de forger un jeton
+        (ou, dès la tâche 5, un code de vérification ou une clé de limitation :
+        les trois usages dérivent tous du même `JWT_SECRET`, cf. `core/auth/cles.py`)."""
+        valeur = self.jwt_secret.get_secret_value()
+        if not valeur:
+            if self.is_prod:
+                raise ValueError(
+                    "JWT_SECRET est obligatoire en production. "
+                    "Générez-le avec : "
+                    "python -c 'import secrets; print(secrets.token_urlsafe(48))'"
+                )
+            # En dev, un secret éphémère : les jetons ne survivent pas à un
+            # redémarrage, ce qui est sans conséquence et évite un secret par
+            # défaut publiquement connu.
+            object.__setattr__(self, "jwt_secret", SecretStr(secrets.token_urlsafe(48)))
             return self
-        if self.is_prod:
+        if self.is_prod and len(valeur) < 32:
             raise ValueError(
-                "JWT_SECRET est obligatoire en production. "
-                "Générez-le avec : python -c 'import secrets; print(secrets.token_urlsafe(48))'"
+                "JWT_SECRET doit contenir au moins 32 caractères en production, "
+                "faute de quoi il est trop facile à retrouver par force brute. "
+                "Générez-en un avec : "
+                "python -c 'import secrets; print(secrets.token_urlsafe(48))'"
             )
-        # En dev, un secret éphémère : les jetons ne survivent pas à un redémarrage,
-        # ce qui est sans conséquence et évite un secret par défaut publiquement connu.
-        object.__setattr__(self, "jwt_secret", SecretStr(secrets.token_urlsafe(48)))
         return self
 
 
