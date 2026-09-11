@@ -57,3 +57,49 @@ def test_secrets_non_exposes_dans_repr() -> None:
     s = get_settings()
     assert "TOKEN_DE_TEST" not in repr(s)
     assert "motdepasse_test" not in repr(s)
+
+
+def test_jwt_secret_absent_refuse_en_prod(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Un secret vide en production permettrait de forger n'importe quel jeton."""
+    monkeypatch.setenv("ENVIRONMENT", "prod")
+    monkeypatch.delenv("JWT_SECRET", raising=False)
+    get_settings.cache_clear()
+    with pytest.raises(ValidationError):
+        get_settings()
+
+
+def test_jwt_secret_absent_tolere_en_dev(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("ENVIRONMENT", "dev")
+    monkeypatch.delenv("JWT_SECRET", raising=False)
+    get_settings.cache_clear()
+    settings = get_settings()
+    assert settings.jwt_secret.get_secret_value()  # secret éphémère généré
+
+
+def test_garde_fous_auth_valeurs_par_defaut() -> None:
+    settings = get_settings()
+    assert settings.code_ttl_secondes == 300
+    assert settings.code_essais_max == 5
+    assert settings.auth_cooldown_secondes == 60
+    assert settings.auth_envois_par_heure == 3
+    assert settings.auth_envois_par_jour == 10
+    assert settings.auth_envois_par_ip_heure == 10
+    assert settings.auth_plafond_global_jour == 500
+    assert settings.jwt_duree_jours == 30
+
+
+def test_cookie_secure_suit_l_environnement(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("ENVIRONMENT", "dev")
+    get_settings.cache_clear()
+    assert get_settings().cookie_session_secure is False
+    monkeypatch.setenv("ENVIRONMENT", "prod")
+    monkeypatch.setenv("JWT_SECRET", "secret_de_test")
+    get_settings.cache_clear()
+    assert get_settings().cookie_session_secure is True
+
+
+def test_secret_jwt_absent_du_dump(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Le secret ne doit pas fuiter dans les logs via model_dump()."""
+    monkeypatch.setenv("JWT_SECRET", "ne_doit_pas_apparaitre")
+    get_settings.cache_clear()
+    assert "ne_doit_pas_apparaitre" not in str(get_settings().model_dump())

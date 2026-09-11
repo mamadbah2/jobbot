@@ -6,10 +6,11 @@ sont des variables d'environnement pour pouvoir être ajustés sans redéploieme
 
 from __future__ import annotations
 
+import secrets
 from functools import lru_cache
 from typing import Literal
 
-from pydantic import Field, SecretStr
+from pydantic import Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 Environment = Literal["dev", "prod"]
@@ -50,6 +51,27 @@ class Settings(BaseSettings):
     # --- Redis ---
     redis_url: str = "redis://redis:6379/0"
 
+    # --- Authentification (spec Phase 2, §5 et §10) ---
+    # Vide autorisé en dev seulement : voir le validateur plus bas.
+    jwt_secret: SecretStr = SecretStr("")
+    jwt_duree_jours: int = Field(default=30, ge=1)
+    cookie_session_nom: str = "jobbot_session"
+    telegram_bot_username: str = ""
+
+    # Le code vit en Redis, haché, et expire tout seul (§2, interdiction n°2).
+    code_ttl_secondes: int = Field(default=300, ge=60)
+    code_essais_max: int = Field(default=5, ge=1)
+
+    # Garde-fous de l'envoi. L'endpoint est public : non protégé, il permet
+    # d'inonder l'adresse d'un tiers et de brûler la réputation du domaine (§7).
+    auth_cooldown_secondes: int = Field(default=60, ge=0)
+    auth_envois_par_heure: int = Field(default=3, ge=1)
+    auth_envois_par_jour: int = Field(default=10, ge=1)
+    auth_envois_par_ip_heure: int = Field(default=10, ge=1)
+    auth_plafond_global_jour: int = Field(default=500, ge=1)
+
+    fournisseur_courriel: str = "console"
+
     # --- Serveur HTTP (healthcheck, puis webhook de paiement en §10) ---
     http_host: str = "0.0.0.0"  # noqa: S104 — écoute dans le conteneur, exposée par compose
     http_port: int = 8080
@@ -89,6 +111,26 @@ class Settings(BaseSettings):
     @property
     def is_prod(self) -> bool:
         return self.environment == "prod"
+
+    @property
+    def cookie_session_secure(self) -> bool:
+        """Cookie `Secure` en production ; en dev on travaille en HTTP."""
+        return self.is_prod
+
+    @model_validator(mode="after")
+    def _exiger_un_secret_en_prod(self) -> Settings:
+        """En prod, un secret vide permettrait de forger n'importe quel jeton."""
+        if self.jwt_secret.get_secret_value():
+            return self
+        if self.is_prod:
+            raise ValueError(
+                "JWT_SECRET est obligatoire en production. "
+                "Générez-le avec : python -c 'import secrets; print(secrets.token_urlsafe(48))'"
+            )
+        # En dev, un secret éphémère : les jetons ne survivent pas à un redémarrage,
+        # ce qui est sans conséquence et évite un secret par défaut publiquement connu.
+        object.__setattr__(self, "jwt_secret", SecretStr(secrets.token_urlsafe(48)))
+        return self
 
 
 @lru_cache(maxsize=1)
