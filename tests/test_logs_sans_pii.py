@@ -7,9 +7,16 @@ vide toute la chaîne de processeurs. Si un jour quelqu'un liait une adresse à
 un `contextvar` (motif courant de traçage par requête), ces tests-là
 continueraient de passer pendant que l'adresse fuiterait sur chaque ligne.
 
-Celui-ci exerce le VRAI pipeline (`setup_logging(json_output=True)`), capture
-la sortie standard pendant un parcours d'authentification complet, et
-inspecte ce qui a été rendu.
+Les tests de ce fichier exercent le VRAI pipeline structlog
+(`setup_logging(json_output=True)`) via `TestClient` : ils couvrent le
+gestionnaire global d'exception de `src/api/app.py` et la ligne structlog
+qu'il émet — **pas** ce que la bibliothèque standard journalise ensuite,
+puisque `TestClient` n'exécute jamais la couche protocole d'uvicorn
+(`starlette/middleware/errors.py` relance toute exception non rattrapée
+après le gestionnaire ; c'est uvicorn, pas `TestClient`, qui la reçoit et la
+journalise avec sa trace complète sur `uvicorn.error`). Cette couche-là,
+avec un vrai process uvicorn, est couverte par
+`tests/test_logs_sans_pii_uvicorn_reel.py`.
 
 Lancer avec : RUN_INTEGRATION_TESTS=1 pytest -m integration
 """
