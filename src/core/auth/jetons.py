@@ -47,7 +47,8 @@ def encoder(*, user_id: int, token_version: int, secret: str, duree_jours: int) 
 
 
 def decoder(jeton: str, *, secret: str) -> Revendications:
-    """Vérifie signature et expiration, ou lève `JetonInvalide`.
+    """Vérifie signature et expiration avec la clé dédiée aux jetons, ou lève
+    `JetonInvalide`.
 
     `algorithms` est explicitement restreint : sans cette liste, un jeton forgé
     avec `alg: none` serait accepté sans aucune signature. `token_version` est

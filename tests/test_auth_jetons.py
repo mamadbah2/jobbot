@@ -7,10 +7,15 @@ from datetime import UTC, datetime, timedelta
 import jwt
 import pytest
 
+from src.core.auth.cles import deriver
 from src.core.auth.jetons import Revendications, decoder, encoder
 from src.core.erreurs import JetonInvalide
 
-SECRET = "secret_de_test"
+# Forme réelle de la clé reçue en production : une clé dérivée, jamais le
+# JWT_SECRET brut (séparation des clés, tâche 5). Un secret court ferait
+# d'ailleurs émettre à pyjwt un InsecureKeyLengthWarning — la RFC 7518 §3.2
+# demande 32 octets minimum pour HMAC-SHA256.
+SECRET = deriver("un_secret_d_exploitation_de_plus_de_32_caracteres", "jeton")
 
 
 def test_aller_retour() -> None:
@@ -19,7 +24,8 @@ def test_aller_retour() -> None:
 
 
 def test_signature_d_un_autre_secret_refusee() -> None:
-    jeton = encoder(user_id=7, token_version=0, secret="autre_secret", duree_jours=30)
+    autre_cle = deriver("un_tout_autre_secret_d_exploitation_long", "jeton")
+    jeton = encoder(user_id=7, token_version=0, secret=autre_cle, duree_jours=30)
     with pytest.raises(JetonInvalide):
         decoder(jeton, secret=SECRET)
 
