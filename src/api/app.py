@@ -13,7 +13,10 @@ from fastapi.responses import JSONResponse
 from src.api.routers import auth, moi, sante
 from src.core.erreurs import (
     AdresseInvalide,
+    CodeExpire,
+    CodeInvalide,
     CompteInexistant,
+    ContactUsurpe,
     EnvoiImpossible,
     ErreurMetier,
     InscriptionIncomplete,
@@ -26,6 +29,9 @@ from src.core.erreurs import (
     TelephoneDejaUtilise,
     TropDeDemandes,
 )
+from src.logging_setup import get_logger
+
+log = get_logger(__name__)
 
 # Les bornes des schémas pydantic n'agissent qu'après le parsing complet du
 # corps : sur un endpoint public non authentifié, ça laisse n'importe qui
@@ -52,6 +58,11 @@ _STATUTS: dict[type[ErreurMetier], int] = {
     CompteInexistant: status.HTTP_404_NOT_FOUND,
     EnvoiImpossible: status.HTTP_503_SERVICE_UNAVAILABLE,
     LiaisonIndisponible: status.HTTP_503_SERVICE_UNAVAILABLE,
+    # Explicites depuis que /auth/code/verifie les lève réellement : un choix,
+    # pas le défaut 400 par omission (revue finale, corrections mineures).
+    CodeInvalide: status.HTTP_400_BAD_REQUEST,
+    CodeExpire: status.HTTP_400_BAD_REQUEST,
+    ContactUsurpe: status.HTTP_400_BAD_REQUEST,
 }
 
 
@@ -69,6 +80,28 @@ def create_app() -> FastAPI:
             entetes["Retry-After"] = str(exc.attendre_secondes)
         return JSONResponse(
             status_code=code_http, content={"erreur": exc.code}, headers=entetes
+        )
+
+    @app.exception_handler(Exception)
+    async def _exception_non_rattrapee(request: Request, exc: Exception) -> JSONResponse:
+        """Filet de sécurité (IMPORTANT 7, revue finale).
+
+        `src/api/main.py` passe `log_config=None` à uvicorn : sans ce
+        gestionnaire, une exception non rattrapée serait journalisée par la
+        bibliothèque standard avec sa trace complète. Sur une erreur
+        SQLAlchemy, `__str__` embarque couramment les paramètres liés
+        (adresse, numéro — §14.4). On ne journalise donc QUE le nom du type,
+        jamais le message ni la trace.
+
+        Ne concerne ni les `ErreurMetier` (gestionnaire dédié ci-dessus,
+        prioritaire par résolution de type exacte de Starlette) ni les
+        `HTTPException` de FastAPI/Starlette (gestionnaires par défaut, même
+        raison).
+        """
+        log.error("exception_non_rattrapee", type_erreur=type(exc).__name__)
+        return JSONResponse(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            content={"erreur": "erreur_interne"},
         )
 
     @app.middleware("http")

@@ -25,6 +25,7 @@ import structlog
 import structlog.testing
 from fastapi.testclient import TestClient
 
+from src.api.app import create_app
 from src.api.routers.auth import log as log_du_router_auth
 from src.config import get_settings
 from src.logging_setup import setup_logging
@@ -104,6 +105,34 @@ def test_le_parcours_d_authentification_ne_fuite_rien_dans_les_logs(
     assert TEL.removeprefix("+221") not in rendu  # forme locale à 9 chiffres
     assert code not in rendu
     assert jeton not in rendu
+
+
+@pytest.mark.integration
+def test_exception_non_rattrapee_ne_fuite_rien_et_renvoie_500(
+    pipeline_de_logs_reel: io.StringIO,
+) -> None:
+    """IMPORTANT 7 (revue finale) : une route qui lève une exception non
+    rattrapée portant une adresse dans son message doit renvoyer 500, et le
+    gestionnaire global (`src/api/app.py`) ne doit journaliser que le nom du
+    type de l'exception — jamais l'adresse ni le message brut.
+    """
+    app = create_app()
+
+    @app.get("/test-exception-non-rattrapee")
+    async def _lever_une_exception() -> None:
+        raise RuntimeError(f"fuite potentielle vers {ADRESSE}")
+
+    with TestClient(app, raise_server_exceptions=False) as client:
+        reponse = client.get("/test-exception-non-rattrapee")
+
+    assert reponse.status_code == 500
+    assert reponse.json() == {"erreur": "erreur_interne"}
+
+    rendu = pipeline_de_logs_reel.getvalue()
+    assert rendu, "le pipeline réel n'a rien rendu : le test ne prouve rien"
+    assert ADRESSE not in rendu
+    assert "fuite potentielle" not in rendu
+    assert "RuntimeError" in rendu  # le TYPE, seule information journalisée
 
 
 @pytest.mark.integration
