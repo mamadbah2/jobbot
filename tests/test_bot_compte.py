@@ -70,6 +70,35 @@ def _patch_session_scope(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("src.bot.handlers.compte.session_scope", lambda: _FauxScope())
 
 
+class _SessionInstrumentee:
+    """Session bidon qui compte les appels à `execute`, pour prouver qu'un
+    chemin donné n'a jamais touché la base (round de correction 2). Si le
+    code testé finit par y toucher quand même, on le veut explicite plutôt
+    que masqué par une `AttributeError` sur une méthode absente."""
+
+    def __init__(self) -> None:
+        self.appels_execute = 0
+
+    async def execute(self, *args: object, **kwargs: object) -> object:
+        self.appels_execute += 1
+        raise AssertionError("la session ne doit pas être sollicitée pour ce chemin")
+
+
+class _ScopeInstrumente:
+    """Comme `_FauxScope`, mais garde la session créée accessible depuis
+    l'extérieur du `async with`, pour vérifier après coup qu'elle n'a pas
+    été sollicitée."""
+
+    def __init__(self) -> None:
+        self.session = _SessionInstrumentee()
+
+    async def __aenter__(self) -> _SessionInstrumentee:
+        return self.session
+
+    async def __aexit__(self, *exc: object) -> None:
+        return None
+
+
 async def test_contact_usurpe_refuse_sans_toucher_la_base(monkeypatch: pytest.MonkeyPatch) -> None:
     answer = AsyncMock()
     monkeypatch.setattr(Message, "answer", answer)
@@ -150,11 +179,11 @@ async def test_telegram_deja_pris_par_un_autre_compte(monkeypatch: pytest.Monkey
 
 
 async def test_numero_etranger_recoit_une_reponse(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Round de correction 1 : un numéro non sénégalais (diaspora, SIM
-    malienne/ivoirienne...) fait lever `NumeroInvalide` par
-    `comptes.lier_telegram` (via `telephone.normaliser`). Sans ce `except`,
-    l'exception remontait et l'utilisateur ne recevait aucune réponse — §7,
-    ne jamais échouer en silence."""
+    """Round de correction 1 : documente la branche `except NumeroInvalide`
+    en simulant directement `comptes.lier_telegram`. Ne prouve que
+    l'existence du `except`, pas que le cas se produit réellement — c'est
+    `test_numero_etranger_normalisation_reelle_ne_touche_pas_la_base`
+    ci-dessous, par la vraie chaîne, qui fait foi (round de correction 2)."""
     answer = AsyncMock()
     monkeypatch.setattr(Message, "answer", answer)
     monkeypatch.setattr(
@@ -172,3 +201,46 @@ async def test_numero_etranger_recoit_une_reponse(monkeypatch: pytest.MonkeyPatc
     answer.assert_awaited_once()
     assert answer.await_args.args[0] == texts.COMPTE_NUMERO_ETRANGER
     assert isinstance(answer.await_args.kwargs["reply_markup"], ReplyKeyboardRemove)
+
+
+@pytest.mark.parametrize(
+    "numero",
+    ["+33612345678", "223701234567"],
+    ids=["hors_senegal", "invalide_sans_indicatif_senegalais"],
+)
+async def test_numero_etranger_normalisation_reelle_ne_touche_pas_la_base(
+    monkeypatch: pytest.MonkeyPatch, numero: str
+) -> None:
+    """Round de correction 2 : la vraie chaîne, pas une simulation.
+
+    `comptes.lier_telegram` n'est PAS mocké : on le laisse appeler
+    `par_telephone`, qui appelle `telephone.normaliser(numero)` avant même de
+    construire la requête. `+33612345678` (français, donc valide mais hors
+    Sénégal) et `223701234567` (malien, sans le `+`, donc invalide pour
+    `phonenumbers` avec la région de repli SN) empruntent deux chemins
+    d'erreur différents dans `telephone.normaliser` (`numero_hors_senegal`
+    contre `numero_invalide`), mais doivent produire la même réponse
+    utilisateur.
+
+    `comptes.par_telegram` (le contrôle « déjà lié », sans rapport avec la
+    normalisation du numéro) reste mocké : c'est ce qui permet d'affirmer que
+    le seul appel restant sur la session bidon serait celui de
+    `par_telephone`, et que `telephone.normaliser` l'empêche d'avoir lieu.
+    `_SessionInstrumentee.appels_execute == 0` est la preuve : le refus vient
+    de la normalisation, pas d'un aller-retour en base.
+    """
+    answer = AsyncMock()
+    monkeypatch.setattr(Message, "answer", answer)
+    monkeypatch.setattr(
+        "src.bot.handlers.compte.comptes.par_telegram", AsyncMock(return_value=None)
+    )
+    scope = _ScopeInstrumente()
+    monkeypatch.setattr("src.bot.handlers.compte.session_scope", lambda: scope)
+
+    message = _message_avec_contact(numero=numero, contact_user_id=555, expediteur_id=555)
+    await contact_recu(message)  # ne doit lever aucune exception
+
+    answer.assert_awaited_once()
+    assert answer.await_args.args[0] == texts.COMPTE_NUMERO_ETRANGER
+    assert isinstance(answer.await_args.kwargs["reply_markup"], ReplyKeyboardRemove)
+    assert scope.session.appels_execute == 0
