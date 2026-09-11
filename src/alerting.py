@@ -12,20 +12,15 @@ appelants : le worker d'ingestion ne connaît que `AlerteAdmin`.
 
 from __future__ import annotations
 
-from typing import Any, Protocol
+from typing import Any
 
 from src.config import Settings
+from src.core.alerte import AlerteAdmin
 from src.logging_setup import get_logger
 
 log = get_logger(__name__)
 
-
-class AlerteAdmin(Protocol):
-    """Canal d'alerte administrateur."""
-
-    async def envoyer(self, evenement: str, **contexte: Any) -> None:
-        """Signale un incident d'exploitation à l'administrateur."""
-        ...
+__all__ = ["AlerteAdmin", "AlerteJournalisee", "construire_alerte"]
 
 
 class AlerteJournalisee:

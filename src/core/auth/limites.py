@@ -14,7 +14,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
-from src.alerting import AlerteAdmin
+from src.core.alerte import AlerteAdmin
 from src.core.auth.cles import empreinte_hex
 from src.core.cache import CacheRedis
 from src.core.erreurs import PlafondGlobalAtteint, TropDeDemandes
