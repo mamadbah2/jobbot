@@ -1,11 +1,10 @@
-"""Entrypoint du process `bot` : aiogram + serveur HTTP (healthcheck, webhook §10)."""
+"""Entrypoint du process `bot` : aiogram (le serveur HTTP vit dans le process `api`, §4)."""
 
 from __future__ import annotations
 
 import asyncio
 import contextlib
 
-import uvicorn
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.exceptions import TelegramUnauthorizedError
@@ -13,7 +12,6 @@ from aiogram.exceptions import TelegramUnauthorizedError
 from src.bot.handlers import build_router
 from src.config import Settings, get_settings
 from src.db.session import dispose_engine
-from src.health import create_app
 from src.logging_setup import get_logger, setup_logging
 
 log = get_logger(__name__)
@@ -23,18 +21,6 @@ def _build_dispatcher() -> Dispatcher:
     dp = Dispatcher()
     dp.include_router(build_router())
     return dp
-
-
-async def _run_http(settings: Settings) -> None:
-    """Sert /health dans le même process (CLAUDE.md §4)."""
-    config = uvicorn.Config(
-        create_app(),
-        host=settings.http_host,
-        port=settings.http_port,
-        log_config=None,  # structlog gère déjà les logs
-        access_log=False,
-    )
-    await uvicorn.Server(config).serve()
 
 
 async def _run_telegram(bot: Bot, dp: Dispatcher, settings: Settings) -> None:
@@ -68,23 +54,12 @@ async def main() -> None:
         "demarrage_bot",
         environment=settings.environment,
         telegram_mode=settings.telegram_mode,
-        http_port=settings.http_port,
     )
 
-    http_task = asyncio.create_task(_run_http(settings), name="http")
     telegram_task = asyncio.create_task(_run_telegram(bot, dp, settings), name="telegram")
 
     try:
-        done, pending = await asyncio.wait(
-            {http_task, telegram_task}, return_when=asyncio.FIRST_COMPLETED
-        )
-        for task in pending:
-            task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await task
-        for task in done:
-            # Propage l'erreur qui a fait tomber le process, sans plantage silencieux (§7).
-            task.result()
+        await telegram_task
     except TelegramUnauthorizedError:
         # Erreur de configuration, pas de réseau : on veut un message lisible
         # dans les logs plutôt qu'une pile d'exceptions.

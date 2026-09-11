@@ -45,6 +45,15 @@ markers = [
     "integration: nécessite Postgres et Redis réels ; activé par RUN_INTEGRATION_TESTS=1",
 ]
 addopts = "-m 'not integration'"
+filterwarnings = [
+    # Avertissements internes à starlette.testclient (tâche 11), déclenchés dès
+    # l'import de `fastapi.testclient.TestClient` — code du brief, pas le nôtre.
+    # Corriger imposerait soit `httpx2` (dépendance non justifiée, §3), soit un
+    # downgrade de fastapi/starlette (hors périmètre). Portée volontairement
+    # étroite : seuls ces deux messages précis sont ignorés.
+    "ignore:Using .httpx. with .starlette\\.testclient. is deprecated.*httpx2.*:UserWarning",
+    "ignore:The anyio\\.abc\\.BlockingPortal alias is deprecated.*:DeprecationWarning",
+]
 
 [tool.ruff]
 line-length = 100
