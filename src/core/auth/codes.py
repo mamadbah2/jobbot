@@ -15,8 +15,8 @@ from __future__ import annotations
 
 import hmac
 import secrets
-from hashlib import sha256
 
+from src.core.auth.cles import empreinte_hex
 from src.core.cache import CacheRedis
 from src.core.erreurs import CodeExpire, CodeInvalide
 
@@ -29,7 +29,7 @@ def generer_code() -> str:
 
 
 def _empreinte(valeur: str, secret: str) -> str:
-    return hmac.new(secret.encode(), valeur.encode(), sha256).hexdigest()
+    return empreinte_hex(secret, valeur)
 
 
 def _cle_code(adresse: str, secret: str) -> str:

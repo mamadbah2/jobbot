@@ -20,6 +20,16 @@ from typing import Literal
 Usage = Literal["jeton", "code", "limite"]
 
 
+def empreinte_hex(cle: str, message: str) -> str:
+    """HMAC-SHA256 en hexadécimal — primitive commune à la dérivation de clés,
+    au hachage des codes et à celui des clés de limitation.
+
+    Une seule implémentation : trois copies du même calcul finiraient par
+    diverger, et une divergence silencieuse sur un HMAC ne se voit pas en test.
+    """
+    return hmac.new(cle.encode(), message.encode(), sha256).hexdigest()
+
+
 def deriver(secret: str, usage: Usage) -> str:
     """Clé dédiée à un usage, en hexadécimal."""
-    return hmac.new(secret.encode(), f"jobbot:cle:{usage}".encode(), sha256).hexdigest()
+    return empreinte_hex(secret, f"jobbot:cle:{usage}")
