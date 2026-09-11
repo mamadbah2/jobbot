@@ -116,6 +116,62 @@ def test_le_code_survit_a_une_inscription_incomplete(
 
 
 @pytest.mark.integration
+def test_le_code_survit_a_un_numero_invalide(
+    client_auth: TestClient, fournisseur_courriel_espion: FournisseurCourrielEspion
+) -> None:
+    """Important 3 (revue finale) : une faute de frappe dans le numéro est
+    l'erreur la plus banale du parcours (§11). Elle ne doit pas obliger
+    l'utilisateur à redemander un email, comme `InscriptionIncomplete`."""
+    code = _code(client_auth, fournisseur_courriel_espion)
+    r = client_auth.post(
+        "/auth/code/verifie",
+        json={"email": ADRESSE, "code": code, "telephone": "pas un numero",
+              "nom_complet": "Fatou Diop"},
+    )
+    assert r.status_code == 422
+    assert r.json()["erreur"] == "numero_invalide"
+    # Le même code, corrigé, doit encore fonctionner.
+    r = client_auth.post(
+        "/auth/code/verifie",
+        json={"email": ADRESSE, "code": code, "telephone": TEL, "nom_complet": "Fatou Diop"},
+    )
+    assert r.status_code == 200
+    assert len(fournisseur_courriel_espion.envois) == 1  # aucun second email
+
+
+@pytest.mark.integration
+def test_le_code_survit_a_un_telephone_deja_utilise(
+    client_auth: TestClient, fournisseur_courriel_espion: FournisseurCourrielEspion
+) -> None:
+    """Idem pour `TelephoneDejaUtilise` : deux comptes ne partagent jamais un
+    numéro (§5), mais la victime de cette collision doit pouvoir corriger
+    sans redemander un email."""
+    autre_adresse = "autre@jobbot-test.sn"
+    autre_code = _code(client_auth, fournisseur_courriel_espion, autre_adresse)
+    r = client_auth.post(
+        "/auth/code/verifie",
+        json={"email": autre_adresse, "code": autre_code, "telephone": TEL,
+              "nom_complet": "Premier Compte"},
+    )
+    assert r.status_code == 200
+
+    code = _code(client_auth, fournisseur_courriel_espion)
+    r = client_auth.post(
+        "/auth/code/verifie",
+        json={"email": ADRESSE, "code": code, "telephone": TEL, "nom_complet": "Fatou Diop"},
+    )
+    assert r.status_code == 409
+    assert r.json()["erreur"] == "telephone_deja_utilise"
+    # Le même code, avec un numéro différent, doit encore fonctionner.
+    r = client_auth.post(
+        "/auth/code/verifie",
+        json={"email": ADRESSE, "code": code, "telephone": "+221781234567",
+              "nom_complet": "Fatou Diop"},
+    )
+    assert r.status_code == 200
+
+
+@pytest.mark.integration
 def test_reconnexion_sans_ressaisir(
     client_auth: TestClient, fournisseur_courriel_espion: FournisseurCourrielEspion
 ) -> None:

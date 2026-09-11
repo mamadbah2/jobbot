@@ -27,7 +27,7 @@ from src.core.auth.limites import (
     compter_code_invalide,
 )
 from src.core.cache import CacheRedis
-from src.core.erreurs import CodeInvalide, EnvoiImpossible, InscriptionIncomplete
+from src.core.erreurs import CodeInvalide, EnvoiImpossible, ErreurMetier
 from src.courriel.provider import FournisseurCourriel, construire_fournisseur
 from src.db.models import User
 from src.logging_setup import get_logger
@@ -194,9 +194,14 @@ async def verifier_code(
             telephone_saisi=corps.telephone,
             nom_complet=corps.nom_complet,
         )
-    except InscriptionIncomplete:
-        # `verifier` a consommé le code. Le redéposer : sinon l'utilisateur
-        # devrait redemander un email juste pour saisir son nom.
+    except ErreurMetier:
+        # `verifier` a déjà consommé le code, avant même que `connecter_ou_inscrire`
+        # ne soit appelé. `InscriptionIncomplete` (nom/téléphone manquants),
+        # `NumeroInvalide` (faute de frappe la plus banale du parcours),
+        # `NomInvalide` et `TelephoneDejaUtilise` sont tous des erreurs de
+        # SAISIE : l'utilisateur doit pouvoir corriger et resoumettre sans
+        # redemander un email, attendre le cooldown et entamer son quota
+        # d'envois (§11 : l'abandon en onboarding est le risque principal).
         await codes.deposer(
             cache,
             adresse,
