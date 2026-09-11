@@ -7,6 +7,10 @@ chaîne, sinon l'unicité ne protège rien et un utilisateur crée un doublon en
 tapant « 77 123 45 67 » au lieu de « +221771234567 ».
 
 Seul le Sénégal est accepté : Wave, Orange Money et Free Money le sont aussi.
+
+`LONGUEUR_MAX = 64` : le format le plus verbeux qu'on accepte
+(`+221 (77) 123-45-67`) fait 19 caractères ; 64 laisse toute la marge utile
+sans ouvrir la porte à une saisie non bornée (`src/core/saisie.py`).
 """
 
 from __future__ import annotations
@@ -14,15 +18,15 @@ from __future__ import annotations
 import phonenumbers
 
 from src.core.erreurs import NumeroInvalide
+from src.core.saisie import texte_saisi
 
 REGION = "SN"
+LONGUEUR_MAX = 64
 
 
 def normaliser(numero: str) -> str:
     """Rend le numéro au format E.164, ou lève `NumeroInvalide`."""
-    brut = numero.strip()
-    if not brut:
-        raise NumeroInvalide("numero_vide")
+    brut = texte_saisi(numero, longueur_max=LONGUEUR_MAX, erreur=NumeroInvalide, sujet="numero")
 
     try:
         analyse = phonenumbers.parse(brut, REGION)
