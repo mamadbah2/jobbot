@@ -46,3 +46,12 @@ def test_aide_liste_les_commandes() -> None:
     """§11 : /aide est toujours disponible et doit s'auto-documenter."""
     assert "/start" in texts.AIDE
     assert "/aide" in texts.AIDE
+
+
+def test_aucun_texte_ne_promet_de_postuler() -> None:
+    """CLAUDE.md §2, interdiction n°1 : le bot prépare, l'utilisateur dépose."""
+    interdits = ("postule pour vous", "postuler à votre place", "je postule", "j'envoie")
+    for nom, valeur in TOUS_LES_TEXTES.items():
+        minuscule = valeur.lower()
+        for motif in interdits:
+            assert motif not in minuscule, f"{nom} promet un envoi : {motif!r}"
