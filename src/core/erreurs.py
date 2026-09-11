@@ -22,6 +22,7 @@ __all__ = [
     "JetonInvalide",
     "NomInvalide",
     "TelegramDejaLie",
+    "EnvoiImpossible",
 ]
 
 
@@ -99,3 +100,9 @@ class TelegramDejaLie(ErreurMetier):
     """Cet identifiant Telegram est déjà rattaché à un autre compte."""
 
     code = "telegram_deja_lie"
+
+
+class EnvoiImpossible(ErreurMetier):
+    """Le fournisseur d'email a échoué. L'utilisateur peut réessayer."""
+
+    code = "envoi_impossible"

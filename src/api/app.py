@@ -14,6 +14,7 @@ from src.api.routers import auth, sante
 from src.core.erreurs import (
     AdresseInvalide,
     CompteInexistant,
+    EnvoiImpossible,
     ErreurMetier,
     InscriptionIncomplete,
     JetonInvalide,
@@ -24,6 +25,13 @@ from src.core.erreurs import (
     TelephoneDejaUtilise,
     TropDeDemandes,
 )
+
+# Les bornes des schémas pydantic n'agissent qu'après le parsing complet du
+# corps : sur un endpoint public non authentifié, ça laisse n'importe qui
+# faire lire des mégaoctets au serveur avant tout rejet. 64 Ko est très large
+# pour du JSON d'authentification ; l'upload de CV de la Phase 3 aura sa
+# propre limite, plus haute, propre à sa route.
+TAILLE_CORPS_MAX = 64 * 1024
 
 # Chaque erreur métier a un statut HTTP, et un seul. Le défaut est 400 :
 # une erreur non listée est une faute de saisie, pas une panne serveur.
@@ -41,6 +49,7 @@ _STATUTS: dict[type[ErreurMetier], int] = {
     PlafondGlobalAtteint: status.HTTP_503_SERVICE_UNAVAILABLE,
     JetonInvalide: status.HTTP_401_UNAUTHORIZED,
     CompteInexistant: status.HTTP_404_NOT_FOUND,
+    EnvoiImpossible: status.HTTP_503_SERVICE_UNAVAILABLE,
 }
 
 
@@ -59,6 +68,32 @@ def create_app() -> FastAPI:
         return JSONResponse(
             status_code=code_http, content={"erreur": exc.code}, headers=entetes
         )
+
+    @app.middleware("http")
+    async def _borner_le_corps(request: Request, appeler_suite):  # type: ignore[no-untyped-def]
+        """Refuse un corps démesuré avant de le bufferiser.
+
+        Les bornes des schémas pydantic n'agissent qu'après le parsing complet :
+        sur un endpoint public non authentifié, cela laisse n'importe qui faire
+        lire des mégaoctets au serveur. 64 Ko est très large pour du JSON
+        d'authentification ; l'upload de CV de la Phase 3 aura sa propre limite.
+        """
+        if request.method in ("POST", "PUT", "PATCH"):
+            longueur = request.headers.get("content-length")
+            if longueur is None:
+                return JSONResponse(
+                    status_code=status.HTTP_411_LENGTH_REQUIRED,
+                    content={"erreur": "longueur_requise"},
+                )
+            try:
+                if int(longueur) > TAILLE_CORPS_MAX:
+                    raise ValueError
+            except ValueError:
+                return JSONResponse(
+                    status_code=status.HTTP_413_CONTENT_TOO_LARGE,
+                    content={"erreur": "corps_trop_grand"},
+                )
+        return await appeler_suite(request)
 
     app.include_router(sante.router)
     app.include_router(auth.router)

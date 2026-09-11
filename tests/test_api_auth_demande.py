@@ -21,6 +21,21 @@ class FournisseurEspion:
         self.envois.append((destinataire, code))
 
 
+class FournisseurEnPanne:
+    """Simule un fournisseur réel qui échoue (round de correction 1, §3)."""
+
+    async def envoyer_code(self, destinataire: str, code: str) -> None:
+        raise RuntimeError("SMTP indisponible")
+
+
+class AlerteEspionne:
+    def __init__(self) -> None:
+        self.alertes: list[tuple[str, dict[str, Any]]] = []
+
+    async def envoyer(self, evenement: str, **contexte: Any) -> None:
+        self.alertes.append((evenement, contexte))
+
+
 @pytest.fixture
 def espion() -> FournisseurEspion:
     return FournisseurEspion()
@@ -79,3 +94,30 @@ def test_cooldown_applique(client: TestClient) -> None:
 def test_le_code_n_est_jamais_dans_la_reponse(client: TestClient) -> None:
     reponse = client.post("/auth/code/demande", json={"email": "fatou@example.sn"})
     assert reponse.text.strip() in ("", "null")
+
+
+def test_envoi_impossible_renvoie_503_et_alerte(faux_cache: FauxCache) -> None:
+    """Un fournisseur en panne ne doit ni planter en 500 ni échouer en silence
+    (round de correction 1, §3). Les compteurs déjà consommés ne sont pas
+    remboursés : ce n'est pas ce que ce test vérifie."""
+    from src.api.routers import auth
+
+    app = create_app()
+    alerte_espionnee = AlerteEspionne()
+
+    async def _cache() -> Any:
+        yield faux_cache
+
+    app.dependency_overrides[deps.cache_redis] = _cache
+    app.dependency_overrides[auth.fournisseur] = lambda: FournisseurEnPanne()
+    app.dependency_overrides[auth.alerte] = lambda: alerte_espionnee
+
+    with TestClient(app, raise_server_exceptions=False) as c:
+        reponse = c.post("/auth/code/demande", json={"email": "fatou@example.sn"})
+
+    assert reponse.status_code == 503
+    assert reponse.json() == {"erreur": "envoi_impossible"}
+    assert len(alerte_espionnee.alertes) == 1
+    evenement, contexte = alerte_espionnee.alertes[0]
+    assert evenement == "envoi_courriel_echoue"
+    assert contexte == {"domaine": "example.sn"}

@@ -59,6 +59,17 @@ def test_secrets_non_exposes_dans_repr() -> None:
     assert "motdepasse_test" not in repr(s)
 
 
+def test_proxy_ips_de_confiance_vide_par_defaut() -> None:
+    """Vide = on ne fait confiance à personne, `request.client.host` reste fiable."""
+    assert get_settings().proxy_ips_de_confiance == ""
+
+
+def test_proxy_ips_de_confiance_surchargeable_par_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("PROXY_IPS_DE_CONFIANCE", "10.0.0.1,10.0.0.2")
+    get_settings.cache_clear()
+    assert get_settings().proxy_ips_de_confiance == "10.0.0.1,10.0.0.2"
+
+
 def test_jwt_secret_absent_refuse_en_prod(monkeypatch: pytest.MonkeyPatch) -> None:
     """Un secret vide en production permettrait de forger n'importe quel jeton."""
     monkeypatch.setenv("ENVIRONMENT", "prod")

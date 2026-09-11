@@ -30,6 +30,8 @@ async def main() -> None:
         port=settings.http_port,
         log_config=None,  # structlog gère déjà les logs
         access_log=False,
+        proxy_headers=bool(settings.proxy_ips_de_confiance),
+        forwarded_allow_ips=settings.proxy_ips_de_confiance or None,
     )
     try:
         await uvicorn.Server(config).serve()

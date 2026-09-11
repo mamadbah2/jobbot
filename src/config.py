@@ -72,6 +72,13 @@ class Settings(BaseSettings):
 
     fournisseur_courriel: str = "console"
 
+    # Adresses du reverse proxy autorisées à renseigner X-Forwarded-For.
+    # Vide par défaut = on ne fait confiance à personne et `request.client.host`
+    # reste l'adresse de la connexion. À renseigner le jour où un proxy existe :
+    # sans cela le plafond par IP compterait tous les utilisateurs ensemble ;
+    # avec une valeur trop large, n'importe qui pourrait usurper son IP.
+    proxy_ips_de_confiance: str = ""
+
     # --- Serveur HTTP (healthcheck, puis webhook de paiement en §10) ---
     http_host: str = "0.0.0.0"  # noqa: S104 — écoute dans le conteneur, exposée par compose
     http_port: int = 8080

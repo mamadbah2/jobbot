@@ -20,6 +20,7 @@ from src.core import courriel_valide
 from src.core.auth import cles, codes
 from src.core.auth.limites import ReglesEnvoi, autoriser_envoi
 from src.core.cache import CacheRedis
+from src.core.erreurs import EnvoiImpossible
 from src.courriel.provider import FournisseurCourriel, construire_fournisseur
 from src.logging_setup import get_logger
 
@@ -91,7 +92,16 @@ async def demander_code(
         secret=cle_code,
         ttl_secondes=settings.code_ttl_secondes,
     )
-    await envoi.envoyer_code(adresse, code)
+    try:
+        await envoi.envoyer_code(adresse, code)
+    except Exception as exc:  # noqa: BLE001 — tout échec du fournisseur
+        # Ne jamais échouer en silence (§7) : un fournisseur en panne bloque
+        # toutes les inscriptions, et personne ne s'en apercevrait avant que
+        # les utilisateurs ne se plaignent. Les compteurs déjà consommés ne
+        # sont PAS remboursés : l'utilisateur réessaiera après le cooldown.
+        await canal_alerte.envoyer("envoi_courriel_echoue", domaine=adresse.rsplit("@", 1)[-1])
+        log.error("envoi_courriel_echoue", erreur=str(exc))
+        raise EnvoiImpossible(EnvoiImpossible.code) from exc
 
     # Jamais le code, jamais l'adresse en clair : ce log sert au suivi des
     # abandons d'onboarding (§11), pas au débogage d'un compte.
