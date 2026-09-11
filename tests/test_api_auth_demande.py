@@ -1,0 +1,81 @@
+"""POST /auth/code/demande (spec Phase 2 §8)."""
+
+from __future__ import annotations
+
+from collections.abc import Iterator
+from typing import Any
+
+import pytest
+from fastapi.testclient import TestClient
+
+from src.api import deps
+from src.api.app import create_app
+from tests.conftest import FauxCache
+
+
+class FournisseurEspion:
+    def __init__(self) -> None:
+        self.envois: list[tuple[str, str]] = []
+
+    async def envoyer_code(self, destinataire: str, code: str) -> None:
+        self.envois.append((destinataire, code))
+
+
+@pytest.fixture
+def espion() -> FournisseurEspion:
+    return FournisseurEspion()
+
+
+@pytest.fixture
+def client(espion: FournisseurEspion, faux_cache: FauxCache) -> Iterator[TestClient]:
+    from src.api.routers import auth
+
+    app = create_app()
+
+    async def _cache() -> Any:
+        yield faux_cache
+
+    app.dependency_overrides[deps.cache_redis] = _cache
+    app.dependency_overrides[auth.fournisseur] = lambda: espion
+    with TestClient(app, raise_server_exceptions=False) as c:
+        yield c
+
+
+def test_demande_acceptee(client: TestClient, espion: FournisseurEspion) -> None:
+    reponse = client.post("/auth/code/demande", json={"email": "fatou@example.sn"})
+    assert reponse.status_code == 202
+    assert len(espion.envois) == 1
+    destinataire, code = espion.envois[0]
+    assert destinataire == "fatou@example.sn"
+    assert len(code) == 6 and code.isdigit()
+
+
+def test_adresse_normalisee_avant_envoi(client: TestClient, espion: FournisseurEspion) -> None:
+    client.post("/auth/code/demande", json={"email": "  Fatou@EXAMPLE.SN "})
+    assert espion.envois[0][0] == "Fatou@example.sn"
+
+
+def test_adresse_invalide_refusee(client: TestClient, espion: FournisseurEspion) -> None:
+    reponse = client.post("/auth/code/demande", json={"email": "pas-une-adresse"})
+    assert reponse.status_code == 422
+    assert reponse.json()["erreur"] == "adresse_invalide"
+    assert espion.envois == []
+
+
+def test_reponse_identique_pour_adresse_connue_ou_non(client: TestClient) -> None:
+    """Sinon l'endpoint dit publiquement qui est client (spec §8, règle n°1)."""
+    a = client.post("/auth/code/demande", json={"email": "connue@example.sn"})
+    b = client.post("/auth/code/demande", json={"email": "jamais.vue@example.sn"})
+    assert (a.status_code, a.text) == (b.status_code, b.text)
+
+
+def test_cooldown_applique(client: TestClient) -> None:
+    client.post("/auth/code/demande", json={"email": "fatou@example.sn"})
+    seconde = client.post("/auth/code/demande", json={"email": "fatou@example.sn"})
+    assert seconde.status_code == 429
+    assert seconde.headers["Retry-After"] == "60"
+
+
+def test_le_code_n_est_jamais_dans_la_reponse(client: TestClient) -> None:
+    reponse = client.post("/auth/code/demande", json={"email": "fatou@example.sn"})
+    assert reponse.text.strip() in ("", "null")
