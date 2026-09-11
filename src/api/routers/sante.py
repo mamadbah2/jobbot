@@ -29,7 +29,9 @@ async def health(response: Response) -> dict[str, Any]:
         checks["postgres"] = "ok"
     except Exception as exc:  # noqa: BLE001 — le healthcheck ne doit jamais lever
         checks["postgres"] = "erreur"
-        log.warning("healthcheck_postgres_ko", error=str(exc))
+        # Le TYPE, pas le message (aligné sur auth.py, même raison) : une
+        # erreur SQLAlchemy peut embarquer `[parameters: ...]` (§14.4).
+        log.warning("healthcheck_postgres_ko", type_erreur=type(exc).__name__)
 
     client = aioredis.from_url(get_settings().redis_url)
     try:
@@ -37,7 +39,7 @@ async def health(response: Response) -> dict[str, Any]:
         checks["redis"] = "ok"
     except Exception as exc:  # noqa: BLE001
         checks["redis"] = "erreur"
-        log.warning("healthcheck_redis_ko", error=str(exc))
+        log.warning("healthcheck_redis_ko", type_erreur=type(exc).__name__)
     finally:
         await client.aclose()
 

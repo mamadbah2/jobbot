@@ -1,4 +1,4 @@
-# Image unique pour les 3 process (bot, worker_ingest, worker_match).
+# Image unique pour les 5 process (api, bot, worker_ingest, worker_match, migrate).
 # La commande est choisie par docker-compose, pas ici.
 FROM python:3.12-slim
 

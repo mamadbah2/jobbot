@@ -120,7 +120,7 @@ def test_envoi_impossible_renvoie_503_et_alerte(faux_cache: FauxCache) -> None:
 
     app.dependency_overrides[deps.cache_redis] = _cache
     app.dependency_overrides[auth.fournisseur] = lambda: FournisseurEnPanne()
-    app.dependency_overrides[auth.alerte] = lambda: alerte_espionnee
+    app.dependency_overrides[deps.alerte] = lambda: alerte_espionnee
 
     with TestClient(app, raise_server_exceptions=False) as c:
         reponse = c.post("/auth/code/demande", json={"email": "fatou@example.sn"})
@@ -149,7 +149,7 @@ def test_message_erreur_fournisseur_jamais_journalise(faux_cache: FauxCache) -> 
     app.dependency_overrides[auth.fournisseur] = (
         lambda: FournisseurEnPanneAvecAdresseDansLeMessage()
     )
-    app.dependency_overrides[auth.alerte] = lambda: AlerteEspionne()
+    app.dependency_overrides[deps.alerte] = lambda: AlerteEspionne()
 
     with capture_logs() as journal, TestClient(app, raise_server_exceptions=False) as c:
         reponse = c.post("/auth/code/demande", json={"email": adresse})

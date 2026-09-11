@@ -10,14 +10,14 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Request, Response, status
+from fastapi import APIRouter, Depends, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.alerting import AlerteAdmin, construire_alerte
 from src.api import deps
 from src.api.schemas.auth import DemandeCode, Utilisateur, VerificationCode
 from src.config import Settings
 from src.core import courriel_valide
+from src.core.alerte import AlerteAdmin
 from src.core.auth import cles, codes, comptes, jetons
 from src.core.auth.limites import (
     ReglesEnvoi,
@@ -43,10 +43,6 @@ def fournisseur(
     return construire_fournisseur(settings)
 
 
-def alerte(settings: Annotated[Settings, Depends(deps.reglages)]) -> AlerteAdmin:
-    return construire_alerte(settings)
-
-
 def _regles(settings: Settings) -> ReglesEnvoi:
     return ReglesEnvoi(
         cooldown_secondes=settings.auth_cooldown_secondes,
@@ -67,16 +63,15 @@ def _regles_verification(settings: Settings) -> ReglesVerification:
 @router.post("/code/demande", status_code=status.HTTP_202_ACCEPTED)
 async def demander_code(
     corps: DemandeCode,
-    request: Request,
     response: Response,
     cache: Annotated[CacheRedis, Depends(deps.cache_redis)],
     settings: Annotated[Settings, Depends(deps.reglages)],
     envoi: Annotated[FournisseurCourriel, Depends(fournisseur)],
-    canal_alerte: Annotated[AlerteAdmin, Depends(alerte)],
+    canal_alerte: Annotated[AlerteAdmin, Depends(deps.alerte)],
+    ip: Annotated[str, Depends(deps.ip_cliente)],
 ) -> None:
     """Envoie un code. Réponse identique que l'adresse existe ou non."""
     adresse = courriel_valide.normaliser(corps.email)
-    ip = request.client.host if request.client else "inconnue"
 
     # Une clé dérivée par usage (tâche 5) : le même JWT_SECRET ne doit pas
     # alimenter en clair la signature des jetons, le hachage des codes et
@@ -153,16 +148,15 @@ def poser_cookie(response: Response, utilisateur: User, settings: Settings) -> N
 @router.post("/code/verifie")
 async def verifier_code(
     corps: VerificationCode,
-    request: Request,
     response: Response,
     session: Annotated[AsyncSession, Depends(deps.session_db)],
     cache: Annotated[CacheRedis, Depends(deps.cache_redis)],
     settings: Annotated[Settings, Depends(deps.reglages)],
+    ip: Annotated[str, Depends(deps.ip_cliente)],
 ) -> Utilisateur:
     """Inscrit ou connecte. Un seul endpoint pour les deux cas (spec §8)."""
     secret_brut = settings.jwt_secret.get_secret_value()
     adresse = courriel_valide.normaliser(corps.email)
-    ip = request.client.host if request.client else "inconnue"
     cle_limite = cles.deriver(secret_brut, "limite")
     regles = _regles_verification(settings)
 

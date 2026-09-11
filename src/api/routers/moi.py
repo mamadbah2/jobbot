@@ -7,10 +7,11 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends
 
-from src.alerting import AlerteAdmin, construire_alerte
 from src.api import deps
 from src.api.schemas.auth import Utilisateur
 from src.config import Settings
+from src.core.alerte import AlerteAdmin
+from src.core.auth import cles
 from src.core.cache import CacheRedis
 from src.core.erreurs import LiaisonIndisponible
 from src.db.models import User
@@ -30,10 +31,6 @@ _PREFIXE_LIAISON = "jobbot:auth:liaison"
 _PREFIXE_LIAISON_ACTIF = "jobbot:auth:liaison-actif"
 
 
-def alerte(settings: Annotated[Settings, Depends(deps.reglages)]) -> AlerteAdmin:
-    return construire_alerte(settings)
-
-
 @router.get("/moi")
 async def moi(
     utilisateur: Annotated[User, Depends(deps.utilisateur_courant)],
@@ -46,13 +43,16 @@ async def jeton_de_liaison(
     utilisateur: Annotated[User, Depends(deps.utilisateur_courant)],
     cache: Annotated[CacheRedis, Depends(deps.cache_redis)],
     settings: Annotated[Settings, Depends(deps.reglages)],
-    canal_alerte: Annotated[AlerteAdmin, Depends(alerte)],
+    canal_alerte: Annotated[AlerteAdmin, Depends(deps.alerte)],
 ) -> dict[str, object]:
     """Lien profond de liaison, pour qui utilise Telegram avec un autre numéro.
 
     Repli du chemin normal, qui est le bouton natif « partager mon contact ».
     Jeton à usage unique : le bot le consomme à la première utilisation.
-    Non devinable (`secrets.token_urlsafe`) et jamais journalisé.
+    Non devinable (`secrets.token_urlsafe`) et jamais journalisé — et jamais
+    stocké en clair dans Redis non plus : seule son empreinte HMAC y figure,
+    comme `codes.py` le fait pour l'adresse et le code (revue finale,
+    corrections mineures). Un dump Redis n'expose donc aucun jeton utilisable.
 
     Un seul jeton valide à la fois par compte : en redemander un périme le
     précédent, pour ne pas accumuler d'occasions qu'un lien fuite (round de
@@ -65,21 +65,28 @@ async def jeton_de_liaison(
         await canal_alerte.envoyer("telegram_bot_username_absent")
         raise LiaisonIndisponible(LiaisonIndisponible.code)
 
+    secret_liaison = cles.deriver(settings.jwt_secret.get_secret_value(), "liaison")
+
     cle_actif = f"{_PREFIXE_LIAISON_ACTIF}:{utilisateur.id}"
-    ancien = await cache.get(cle_actif)
-    if ancien is not None:
-        if isinstance(ancien, bytes):
-            ancien = ancien.decode()
-        await cache.delete(f"{_PREFIXE_LIAISON}:{ancien}")
+    empreinte_ancienne = await cache.get(cle_actif)
+    if empreinte_ancienne is not None:
+        if isinstance(empreinte_ancienne, bytes):
+            empreinte_ancienne = empreinte_ancienne.decode()
+        await cache.delete(f"{_PREFIXE_LIAISON}:{empreinte_ancienne}")
 
     jeton = secrets.token_urlsafe(24)
+    empreinte = cles.empreinte_hex(secret_liaison, jeton)
     # Le pointeur AVANT le jeton : un arrêt entre les deux écritures laisse
     # alors un pointeur vers un jeton inexistant — inoffensif, et rattrapé par
     # l'appel suivant. L'ordre inverse laisserait un jeton valide qu'aucun
     # pointeur ne désigne, donc qu'aucune émission ultérieure ne périmerait
-    # (round de correction 2, tâche 14).
-    await cache.set(cle_actif, jeton, ex=LIAISON_TTL_SECONDES)
-    await cache.set(f"{_PREFIXE_LIAISON}:{jeton}", str(utilisateur.id), ex=LIAISON_TTL_SECONDES)
+    # (round de correction 2, tâche 14). Seule l'EMPREINTE circule entre les
+    # deux clés : le jeton en clair ne quitte cette fonction que dans le lien
+    # renvoyé à l'appelant, jamais vers Redis.
+    await cache.set(cle_actif, empreinte, ex=LIAISON_TTL_SECONDES)
+    await cache.set(
+        f"{_PREFIXE_LIAISON}:{empreinte}", str(utilisateur.id), ex=LIAISON_TTL_SECONDES
+    )
     return {
         "lien": f"https://t.me/{settings.telegram_bot_username}?start={jeton}",
         "expire_dans": LIAISON_TTL_SECONDES,

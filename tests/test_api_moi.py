@@ -16,8 +16,8 @@ import pytest
 from fastapi.testclient import TestClient
 
 from src.api import deps
-from src.api.routers import moi
 from src.config import get_settings
+from src.core.auth import cles
 from tests.conftest import FauxCache, FournisseurCourrielEspion, demander_code_verification
 
 ADRESSE = "fatou@jobbot-test.sn"
@@ -26,6 +26,13 @@ TEL = "+221771234567"
 
 def _code(client: TestClient, espion: FournisseurCourrielEspion, adresse: str = ADRESSE) -> str:
     return demander_code_verification(client, espion, adresse)
+
+
+def _cle_liaison(jeton: str) -> str:
+    """Reproduit le hachage de `src/api/routers/moi.py` : le jeton de liaison
+    ne figure jamais en clair dans une clé Redis (revue finale)."""
+    secret_liaison = cles.deriver(get_settings().jwt_secret.get_secret_value(), "liaison")
+    return f"jobbot:auth:liaison:{cles.empreinte_hex(secret_liaison, jeton)}"
 
 
 class AlerteEspionne:
@@ -159,7 +166,7 @@ def test_jeton_de_liaison_sans_bot_configure_refuse_et_alerte(
     (round de correction 1)."""
     assert get_settings().telegram_bot_username == ""
     espionnee = AlerteEspionne()
-    client_auth.app.dependency_overrides[moi.alerte] = lambda: espionnee  # type: ignore[attr-defined]
+    client_auth.app.dependency_overrides[deps.alerte] = lambda: espionnee  # type: ignore[attr-defined]
 
     _connecter(client_auth, fournisseur_courriel_espion)
     r = client_auth.post("/moi/telegram/jeton")
@@ -189,8 +196,8 @@ def test_jeton_de_liaison_perime_le_precedent(
     second = _jeton_du_lien(client_auth.post("/moi/telegram/jeton").json()["lien"])
 
     assert premier != second
-    assert f"jobbot:auth:liaison:{premier}" not in faux_cache.valeurs
-    assert f"jobbot:auth:liaison:{second}" in faux_cache.valeurs
+    assert _cle_liaison(premier) not in faux_cache.valeurs
+    assert _cle_liaison(second) in faux_cache.valeurs
 
 
 @pytest.mark.integration
@@ -215,15 +222,15 @@ def test_jeton_de_liaison_se_remet_d_un_pointeur_orphelin(
     # Simule l'arrêt : le pointeur `liaison-actif` reste, mais le jeton
     # lui-même disparaît, comme si le processus était mort juste après avoir
     # écrit le pointeur et avant d'écrire le jeton.
-    del faux_cache.valeurs[f"jobbot:auth:liaison:{premier}"]
+    del faux_cache.valeurs[_cle_liaison(premier)]
 
     r = client_auth.post("/moi/telegram/jeton")
     assert r.status_code == 200
     second = _jeton_du_lien(r.json()["lien"])
 
     assert second != premier
-    assert f"jobbot:auth:liaison:{premier}" not in faux_cache.valeurs
-    assert f"jobbot:auth:liaison:{second}" in faux_cache.valeurs
+    assert _cle_liaison(premier) not in faux_cache.valeurs
+    assert _cle_liaison(second) in faux_cache.valeurs
 
 
 @pytest.mark.integration

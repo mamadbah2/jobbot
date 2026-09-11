@@ -10,6 +10,7 @@ from fastapi import Depends, Request
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.alerting import AlerteAdmin, construire_alerte
 from src.config import Settings, get_settings
 from src.core.auth import cles, jetons
 from src.core.erreurs import JetonInvalide
@@ -24,6 +25,28 @@ def reglages() -> Settings:
     (round de correction 1, tâche 14).
     """
     return get_settings()
+
+
+def alerte(settings: Annotated[Settings, Depends(reglages)]) -> AlerteAdmin:
+    """Canal d'alerte admin, injectable par FastAPI.
+
+    Était dupliqué verbatim dans `auth.py` et `moi.py` (revue finale,
+    corrections mineures) : centralisé ici comme `reglages` ci-dessus.
+    """
+    return construire_alerte(settings)
+
+
+def ip_cliente(request: Request) -> str:
+    """Adresse de la connexion TCP, ou `"inconnue"` si absente.
+
+    `request.client.host` reflète déjà, le cas échéant, la ré-écriture faite
+    par `ProxyHeadersMiddleware` d'uvicorn selon `PROXY_IPS_DE_CONFIANCE`
+    (`src/api/main.py`) : rien de plus à faire ici.
+
+    Dupliqué verbatim dans `auth.py` et `moi.py` (revue finale, corrections
+    mineures) : centralisé ici comme `reglages` ci-dessus.
+    """
+    return request.client.host if request.client else "inconnue"
 
 
 async def session_db() -> AsyncIterator[AsyncSession]:
