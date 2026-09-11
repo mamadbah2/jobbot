@@ -73,8 +73,10 @@ class FauxCache:
         self.valeurs[name] = str(valeur)
         return valeur
 
-    async def expire(self, name: str, time: int) -> bool:
+    async def expire(self, name: str, time: int, *, nx: bool = False) -> bool:
         if name not in self.valeurs:
+            return False
+        if nx and name in self.ttl:
             return False
         self.ttl[name] = time
         return True

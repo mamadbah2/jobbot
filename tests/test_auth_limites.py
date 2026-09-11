@@ -124,3 +124,35 @@ async def test_le_plafond_global_n_est_pas_consomme_par_un_refus(faux_cache: Fau
         await demander(faux_cache, alerte, regles)
     cle_globale = next(c for c in faux_cache.valeurs if "global" in c)
     assert faux_cache.valeurs[cle_globale] == "1"
+
+
+async def test_le_ttl_n_est_pas_rallonge_a_chaque_passage(faux_cache: FauxCache) -> None:
+    """`NX` : le TTL posé au premier passage n'est jamais repoussé par les suivants."""
+    alerte = AlerteEspion()
+    regles = ReglesEnvoi(
+        cooldown_secondes=0, par_heure=100, par_jour=100, par_ip_heure=100, plafond_global_jour=500
+    )
+    await demander(faux_cache, alerte, regles)
+    cle_heure = next(c for c in faux_cache.valeurs if ":h:" in c)
+    ttl_initial = faux_cache.ttl[cle_heure]
+
+    await demander(faux_cache, alerte, regles)
+    await demander(faux_cache, alerte, regles)
+
+    assert faux_cache.ttl[cle_heure] == ttl_initial
+
+
+async def test_une_cle_sans_ttl_en_recupere_un_au_passage_suivant(faux_cache: FauxCache) -> None:
+    """Auto-réparation : un TTL perdu (processus mort entre `incr` et `expire`) revient."""
+    alerte = AlerteEspion()
+    regles = ReglesEnvoi(
+        cooldown_secondes=0, par_heure=100, par_jour=100, par_ip_heure=100, plafond_global_jour=500
+    )
+    await demander(faux_cache, alerte, regles)
+    cle_heure = next(c for c in faux_cache.valeurs if ":h:" in c)
+    del faux_cache.ttl[cle_heure]
+    assert cle_heure not in faux_cache.ttl
+
+    await demander(faux_cache, alerte, regles)
+
+    assert cle_heure in faux_cache.ttl

@@ -18,9 +18,6 @@ from src.alerting import AlerteAdmin
 from src.core.auth.cles import empreinte_hex
 from src.core.cache import CacheRedis
 from src.core.erreurs import PlafondGlobalAtteint, TropDeDemandes
-from src.logging_setup import get_logger
-
-log = get_logger(__name__)
 
 _PREFIXE = "jobbot:auth:limite"
 _HEURE = 3600
@@ -48,6 +45,12 @@ def _empreinte(valeur: str, secret: str) -> str:
 
 
 def _fenetre_heure() -> str:
+    # Fenêtre fixe, pas glissante : une requête à 12:59:59 et une à 13:00:01
+    # tombent dans deux fenêtres différentes, ce qui autorise jusqu'au double
+    # du débit nominal pendant quelques secondes à la frontière. Assumé — les
+    # plafonds journalier et global continuent de borner les dégâts, et une
+    # fenêtre glissante coûterait nettement plus cher en complexité pour un
+    # gain qui ne change pas la nature du risque (§2.5, pas de sur-ingénierie).
     return datetime.now(UTC).strftime("%Y%m%d%H")
 
 
@@ -56,10 +59,17 @@ def _fenetre_jour() -> str:
 
 
 async def _incrementer(cache: CacheRedis, cle: str, duree: int) -> int:
-    """Compteur à fenêtre fixe : la clé porte la fenêtre, le TTL la nettoie."""
+    """Compteur à fenêtre fixe : la clé porte la fenêtre, le TTL la nettoie.
+
+    Le TTL est (re)posé à chaque passage avec `NX`, et non seulement à la
+    création. Sans cela, un processus qui meurt entre l'`incr` et l'`expire`
+    laisse une clé éternelle : une fois le plafond franchi, l'adresse est
+    bloquée pour toujours et il faut intervenir à la main dans Redis.
+    `NX` rend l'opération auto-réparante sans jamais rallonger une fenêtre
+    déjà en cours.
+    """
     valeur = await cache.incr(cle)
-    if valeur == 1:
-        await cache.expire(cle, duree)
+    await cache.expire(cle, duree, nx=True)
     return int(valeur)
 
 
