@@ -1540,10 +1540,10 @@ async def session(postgres_url: str) -> AsyncIterator[AsyncSession]:
     moteur = create_async_engine(postgres_url)
     fabrique = async_sessionmaker(moteur, expire_on_commit=False)
     async with fabrique() as session:
-        await session.execute(delete(User).where(User.email.like("%@test.invalid")))
+        await session.execute(delete(User).where(User.email.like("%@jobbot-test.sn")))
         await session.commit()
         yield session
-        await session.execute(delete(User).where(User.email.like("%@test.invalid")))
+        await session.execute(delete(User).where(User.email.like("%@jobbot-test.sn")))
         await session.commit()
     await moteur.dispose()
 
@@ -1565,32 +1565,32 @@ async def test_colonnes_presentes_en_base(session: AsyncSession) -> None:
 
 @pytest.mark.integration
 async def test_compte_sans_telegram_accepte(session: AsyncSession) -> None:
-    session.add(User(email="a@test.invalid", phone="+221771111111", full_name="A"))
+    session.add(User(email="a@jobbot-test.sn", phone="+221771111111", full_name="A"))
     await session.commit()
 
 
 @pytest.mark.integration
 async def test_deux_comptes_sans_telegram_acceptes(session: AsyncSession) -> None:
     """Un index unique tolère plusieurs NULL : sinon un seul compte web serait possible."""
-    session.add(User(email="b@test.invalid", phone="+221772222222", full_name="B"))
-    session.add(User(email="c@test.invalid", phone="+221773333333", full_name="C"))
+    session.add(User(email="b@jobbot-test.sn", phone="+221772222222", full_name="B"))
+    session.add(User(email="c@jobbot-test.sn", phone="+221773333333", full_name="C"))
     await session.commit()
 
 
 @pytest.mark.integration
 async def test_adresse_en_double_refusee(session: AsyncSession) -> None:
-    session.add(User(email="d@test.invalid", phone="+221774444444", full_name="D"))
+    session.add(User(email="d@jobbot-test.sn", phone="+221774444444", full_name="D"))
     await session.commit()
-    session.add(User(email="d@test.invalid", phone="+221775555555", full_name="D2"))
+    session.add(User(email="d@jobbot-test.sn", phone="+221775555555", full_name="D2"))
     with pytest.raises(IntegrityError):
         await session.commit()
 
 
 @pytest.mark.integration
 async def test_telephone_en_double_refuse(session: AsyncSession) -> None:
-    session.add(User(email="e@test.invalid", phone="+221776666666", full_name="E"))
+    session.add(User(email="e@jobbot-test.sn", phone="+221776666666", full_name="E"))
     await session.commit()
-    session.add(User(email="f@test.invalid", phone="+221776666666", full_name="F"))
+    session.add(User(email="f@jobbot-test.sn", phone="+221776666666", full_name="F"))
     with pytest.raises(IntegrityError):
         await session.commit()
 ```
@@ -1754,7 +1754,7 @@ from src.core.erreurs import (
 )
 from src.db.models import User
 
-ADRESSE = "fatou@test.invalid"
+ADRESSE = "fatou@jobbot-test.sn"
 TEL = "+221771234567"
 
 
@@ -1763,10 +1763,10 @@ async def session(postgres_url: str) -> AsyncIterator[AsyncSession]:
     moteur = create_async_engine(postgres_url)
     fabrique = async_sessionmaker(moteur, expire_on_commit=False)
     async with fabrique() as session:
-        await session.execute(delete(User).where(User.email.like("%@test.invalid")))
+        await session.execute(delete(User).where(User.email.like("%@jobbot-test.sn")))
         await session.commit()
         yield session
-        await session.execute(delete(User).where(User.email.like("%@test.invalid")))
+        await session.execute(delete(User).where(User.email.like("%@jobbot-test.sn")))
         await session.commit()
     await moteur.dispose()
 
@@ -1830,7 +1830,7 @@ async def test_telephone_deja_pris_par_un_autre_compte(session: AsyncSession) ->
     await session.commit()
     with pytest.raises(TelephoneDejaUtilise):
         await comptes.connecter_ou_inscrire(
-            session, adresse="autre@test.invalid", telephone_saisi=TEL, nom_complet="Autre"
+            session, adresse="autre@jobbot-test.sn", telephone_saisi=TEL, nom_complet="Autre"
         )
 
 
@@ -2846,7 +2846,7 @@ from src.core.auth import jetons
 from src.db.models import User
 from tests.conftest import FauxCache
 
-ADRESSE = "fatou@test.invalid"
+ADRESSE = "fatou@jobbot-test.sn"
 TEL = "+221771234567"
 
 
@@ -2863,11 +2863,11 @@ async def base(postgres_url: str) -> AsyncIterator[async_sessionmaker[AsyncSessi
     moteur = create_async_engine(postgres_url)
     fabrique = async_sessionmaker(moteur, expire_on_commit=False)
     async with fabrique() as s:
-        await s.execute(delete(User).where(User.email.like("%@test.invalid")))
+        await s.execute(delete(User).where(User.email.like("%@jobbot-test.sn")))
         await s.commit()
     yield fabrique
     async with fabrique() as s:
-        await s.execute(delete(User).where(User.email.like("%@test.invalid")))
+        await s.execute(delete(User).where(User.email.like("%@jobbot-test.sn")))
         await s.commit()
     await moteur.dispose()
 
