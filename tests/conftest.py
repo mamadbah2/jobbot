@@ -172,9 +172,17 @@ def client_auth(
         yield faux_cache
 
     async def _session() -> Any:
+        # Reproduit exactement `src/db/session.py::session_scope` : sans le
+        # rollback sur exception, les tests d'intégration tourneraient avec
+        # une sémantique différente de la production, précisément sur les
+        # chemins d'erreur qui comptent (round de correction finale).
         async with base_utilisateurs_test() as session:
-            yield session
-            await session.commit()
+            try:
+                yield session
+                await session.commit()
+            except Exception:
+                await session.rollback()
+                raise
 
     app.dependency_overrides[deps.cache_redis] = _cache
     app.dependency_overrides[deps.session_db] = _session
