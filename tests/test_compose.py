@@ -39,3 +39,18 @@ def test_les_cinq_processus_sont_declares() -> None:
 def test_postgres_reste_sur_la_boucle_locale() -> None:
     """Ne jamais exposer la base sur 0.0.0.0 (commentaire du fichier compose)."""
     assert all(str(p).startswith("127.0.0.1:") for p in SERVICES["postgres"]["ports"])
+
+
+def test_les_services_applicatifs_partagent_la_meme_politique_de_dependance() -> None:
+    """api, bot, worker_ingest et worker_match doivent dépendre des mêmes services,
+    dans les mêmes conditions — factorisé via l'ancre `x-depends-app` pour éviter
+    qu'une future modification n'en oublie un.
+    """
+    services = ("api", "bot", "worker_ingest", "worker_match")
+    politiques = [SERVICES[nom]["depends_on"] for nom in services]
+    assert all(p == politiques[0] for p in politiques)
+    assert politiques[0] == {
+        "postgres": {"condition": "service_healthy"},
+        "redis": {"condition": "service_healthy"},
+        "migrate": {"condition": "service_completed_successfully"},
+    }
