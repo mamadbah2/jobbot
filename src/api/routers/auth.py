@@ -214,3 +214,15 @@ async def verifier_code(
     poser_cookie(response, utilisateur, settings)
     log.info("compte_connecte", user_id=utilisateur.id, etat=utilisateur.state)
     return Utilisateur.depuis(utilisateur)
+
+
+@router.post("/deconnexion", status_code=status.HTTP_204_NO_CONTENT)
+async def deconnexion(
+    response: Response,
+    utilisateur: Annotated[User, Depends(deps.utilisateur_courant)],
+    session: Annotated[AsyncSession, Depends(deps.session_db)],
+    settings: Annotated[Settings, Depends(reglages)],
+) -> None:
+    """Invalide TOUS les jetons du compte, pas seulement celui-ci (spec §5)."""
+    await comptes.revoquer_jetons(session, utilisateur)
+    response.delete_cookie(settings.cookie_session_nom, path="/")
