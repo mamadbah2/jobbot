@@ -116,3 +116,34 @@ async def autoriser_envoi(
             compte=total,
         )
         raise PlafondGlobalAtteint(PlafondGlobalAtteint.code)
+
+
+@dataclass(frozen=True, slots=True)
+class ReglesVerification:
+    """Plafonds de la vérification de code. Pas de cooldown : un utilisateur
+    légitime qui se trompe de chiffre doit pouvoir recommencer tout de suite."""
+
+    par_heure: int
+    par_ip_heure: int
+
+
+async def autoriser_verification(
+    cache: CacheRedis, *, adresse: str, ip: str, regles: ReglesVerification, secret: str
+) -> None:
+    """Ne rend rien si la tentative est permise ; lève `TropDeDemandes` sinon.
+
+    Le compteur d'essais de `codes.verifier` détruit le code au bout de cinq
+    échecs, mais il ne borne pas la CADENCE : en parallèle, un attaquant peut
+    glisser des tentatives dans la fenêtre entre l'incrément du compteur et la
+    destruction du code. Ce plafond borne le nombre total de tentatives, donc
+    le nombre de coups portés sur un espace de six chiffres.
+    """
+    empreinte = _empreinte(adresse, secret)
+    heure = await _incrementer(cache, f"{_PREFIXE}:vh:{empreinte}:{_fenetre_heure()}", _HEURE)
+    if heure > regles.par_heure:
+        raise TropDeDemandes(attendre_secondes=_HEURE)
+    ip_heure = await _incrementer(
+        cache, f"{_PREFIXE}:vip:{_empreinte(ip, secret)}:{_fenetre_heure()}", _HEURE
+    )
+    if ip_heure > regles.par_ip_heure:
+        raise TropDeDemandes(attendre_secondes=_HEURE)

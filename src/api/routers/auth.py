@@ -11,17 +11,24 @@ from __future__ import annotations
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Request, Response, status
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.alerting import AlerteAdmin, construire_alerte
 from src.api import deps
-from src.api.schemas.auth import DemandeCode
+from src.api.schemas.auth import DemandeCode, Utilisateur, VerificationCode
 from src.config import Settings, get_settings
 from src.core import courriel_valide
-from src.core.auth import cles, codes
-from src.core.auth.limites import ReglesEnvoi, autoriser_envoi
+from src.core.auth import cles, codes, comptes, jetons
+from src.core.auth.limites import (
+    ReglesEnvoi,
+    ReglesVerification,
+    autoriser_envoi,
+    autoriser_verification,
+)
 from src.core.cache import CacheRedis
-from src.core.erreurs import EnvoiImpossible
+from src.core.erreurs import EnvoiImpossible, InscriptionIncomplete
 from src.courriel.provider import FournisseurCourriel, construire_fournisseur
+from src.db.models import User
 from src.logging_setup import get_logger
 
 log = get_logger(__name__)
@@ -50,6 +57,13 @@ def _regles(settings: Settings) -> ReglesEnvoi:
         par_jour=settings.auth_envois_par_jour,
         par_ip_heure=settings.auth_envois_par_ip_heure,
         plafond_global_jour=settings.auth_plafond_global_jour,
+    )
+
+
+def _regles_verification(settings: Settings) -> ReglesVerification:
+    return ReglesVerification(
+        par_heure=settings.auth_verifications_par_heure,
+        par_ip_heure=settings.auth_verifications_par_ip_heure,
     )
 
 
@@ -112,3 +126,87 @@ async def demander_code(
     # abandons d'onboarding (§11), pas au débogage d'un compte.
     log.info("code_demande", domaine=adresse.rsplit("@", 1)[-1])
     response.status_code = status.HTTP_202_ACCEPTED
+
+
+def poser_cookie(response: Response, utilisateur: User, settings: Settings) -> None:
+    """Dépose le jeton de session.
+
+    `httponly` : un cookie lisible en JavaScript est volable par la moindre
+    faille XSS. `samesite=lax` : suffisant puisque `web` et `api` partagent
+    l'origine (§4). `secure` uniquement en production, où l'on est en HTTPS.
+    """
+    secret_brut = settings.jwt_secret.get_secret_value()
+    jeton = jetons.encoder(
+        user_id=utilisateur.id,
+        token_version=utilisateur.token_version,
+        secret=cles.deriver(secret_brut, "jeton"),
+        duree_jours=settings.jwt_duree_jours,
+    )
+    response.set_cookie(
+        settings.cookie_session_nom,
+        jeton,
+        max_age=settings.jwt_duree_jours * 86400,
+        httponly=True,
+        samesite="lax",
+        secure=settings.cookie_session_secure,
+        path="/",
+    )
+
+
+@router.post("/code/verifie")
+async def verifier_code(
+    corps: VerificationCode,
+    request: Request,
+    response: Response,
+    session: Annotated[AsyncSession, Depends(deps.session_db)],
+    cache: Annotated[CacheRedis, Depends(deps.cache_redis)],
+    settings: Annotated[Settings, Depends(reglages)],
+) -> Utilisateur:
+    """Inscrit ou connecte. Un seul endpoint pour les deux cas (spec §8)."""
+    secret_brut = settings.jwt_secret.get_secret_value()
+    adresse = courriel_valide.normaliser(corps.email)
+    ip = request.client.host if request.client else "inconnue"
+
+    # Le compteur d'essais de `codes.verifier` détruit le code au bout de cinq
+    # échecs, mais il ne borne pas la CADENCE : en parallèle, un attaquant peut
+    # glisser des tentatives dans la fenêtre entre l'incrément du compteur et
+    # la destruction du code. Ce plafond, distinct, borne le nombre total de
+    # tentatives.
+    await autoriser_verification(
+        cache,
+        adresse=adresse,
+        ip=ip,
+        regles=_regles_verification(settings),
+        secret=cles.deriver(secret_brut, "limite"),
+    )
+
+    await codes.verifier(
+        cache,
+        adresse,
+        corps.code,
+        secret=cles.deriver(secret_brut, "code"),
+        essais_max=settings.code_essais_max,
+    )
+
+    try:
+        utilisateur = await comptes.connecter_ou_inscrire(
+            session,
+            adresse=adresse,
+            telephone_saisi=corps.telephone,
+            nom_complet=corps.nom_complet,
+        )
+    except InscriptionIncomplete:
+        # `verifier` a consommé le code. Le redéposer : sinon l'utilisateur
+        # devrait redemander un email juste pour saisir son nom.
+        await codes.deposer(
+            cache,
+            adresse,
+            corps.code,
+            secret=cles.deriver(secret_brut, "code"),
+            ttl_secondes=settings.code_ttl_secondes,
+        )
+        raise
+
+    poser_cookie(response, utilisateur, settings)
+    log.info("compte_connecte", user_id=utilisateur.id, etat=utilisateur.state)
+    return Utilisateur.depuis(utilisateur)

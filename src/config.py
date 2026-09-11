@@ -70,6 +70,15 @@ class Settings(BaseSettings):
     auth_envois_par_ip_heure: int = Field(default=10, ge=1)
     auth_plafond_global_jour: int = Field(default=500, ge=1)
 
+    # Plafonds de /auth/code/verifie (pas de cooldown : un utilisateur qui se
+    # trompe de chiffre doit pouvoir recommencer tout de suite). Le compteur
+    # d'essais de `codes.verifier` détruit le code au bout de cinq échecs ;
+    # ceci borne la CADENCE de tentatives, pour empêcher un martèlement
+    # parallèle de grappiller des essais dans la fenêtre de course entre
+    # l'incrément du compteur et la destruction du code.
+    auth_verifications_par_heure: int = Field(default=20, ge=1)
+    auth_verifications_par_ip_heure: int = Field(default=60, ge=1)
+
     fournisseur_courriel: str = "console"
 
     # Adresses du reverse proxy autorisées à renseigner X-Forwarded-For.
