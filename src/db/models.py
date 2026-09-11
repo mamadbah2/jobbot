@@ -64,12 +64,18 @@ class User(TimestampMixin, Base):
     __table_args__ = (_check_in("state", USER_STATES, "ck_users_state"),)
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    telegram_id: Mapped[int] = mapped_column(BigInteger, unique=True, nullable=False, index=True)
-    phone: Mapped[str | None] = mapped_column(String(32))
+    # Identité de connexion depuis le 2026-09-11 (CLAUDE.md §5). Avant cette date
+    # c'était `telegram_id`, quand Telegram était l'unique interface.
+    email: Mapped[str] = mapped_column(String(320), unique=True, nullable=False, index=True)
+    # Obligatoire : sert à retrouver un compte depuis « partager mon contact »
+    # (bouton natif Telegram, numéro déjà vérifié) et au paiement mobile money (§10).
+    phone: Mapped[str] = mapped_column(String(32), unique=True, nullable=False, index=True)
+    # Nullable : un utilisateur venu du web n'a pas encore lié Telegram.
+    # En Postgres, un index unique tolère plusieurs NULL.
+    telegram_id: Mapped[int | None] = mapped_column(BigInteger, unique=True, index=True)
     full_name: Mapped[str | None] = mapped_column(String(255))
-    # Nullable : déduit du CV en Phase 2, confirmé par l'utilisateur avant le
-    # premier envoi car il sert de Reply-To (CLAUDE.md §7 et §14.5).
-    email: Mapped[str | None] = mapped_column(String(320))
+    # Incrémentée pour invalider d'un coup tous les jetons émis (§5).
+    token_version: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     language: Mapped[str] = mapped_column(String(8), default="fr", nullable=False)
     state: Mapped[str] = mapped_column(String(16), default="onboarding", nullable=False)
 
