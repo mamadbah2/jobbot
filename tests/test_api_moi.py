@@ -166,3 +166,36 @@ def test_jeton_de_liaison_perime_le_precedent(
     assert premier != second
     assert f"jobbot:auth:liaison:{premier}" not in faux_cache.valeurs
     assert f"jobbot:auth:liaison:{second}" in faux_cache.valeurs
+
+
+@pytest.mark.integration
+def test_jeton_de_liaison_se_remet_d_un_pointeur_orphelin(
+    client_auth: TestClient,
+    fournisseur_courriel_espion: FournisseurCourrielEspion,
+    faux_cache: FauxCache,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Simule un arrêt du processus entre l'écriture du pointeur et celle du
+    jeton qu'il désigne : le pointeur survit, pointant vers un jeton qui n'a
+    jamais existé en cache. L'émission suivante doit s'en remettre
+    proprement, sans lever d'erreur (round de correction 2)."""
+    monkeypatch.setenv("TELEGRAM_BOT_USERNAME", "jobbot_sn_bot")
+    get_settings.cache_clear()
+    _connecter(client_auth, fournisseur_courriel_espion)
+
+    def _jeton_du_lien(lien: str) -> str:
+        return parse_qs(urlparse(lien).query)["start"][0]
+
+    premier = _jeton_du_lien(client_auth.post("/moi/telegram/jeton").json()["lien"])
+    # Simule l'arrêt : le pointeur `liaison-actif` reste, mais le jeton
+    # lui-même disparaît, comme si le processus était mort juste après avoir
+    # écrit le pointeur et avant d'écrire le jeton.
+    del faux_cache.valeurs[f"jobbot:auth:liaison:{premier}"]
+
+    r = client_auth.post("/moi/telegram/jeton")
+    assert r.status_code == 200
+    second = _jeton_du_lien(r.json()["lien"])
+
+    assert second != premier
+    assert f"jobbot:auth:liaison:{premier}" not in faux_cache.valeurs
+    assert f"jobbot:auth:liaison:{second}" in faux_cache.valeurs

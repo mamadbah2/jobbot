@@ -73,8 +73,13 @@ async def jeton_de_liaison(
         await cache.delete(f"{_PREFIXE_LIAISON}:{ancien}")
 
     jeton = secrets.token_urlsafe(24)
-    await cache.set(f"{_PREFIXE_LIAISON}:{jeton}", str(utilisateur.id), ex=LIAISON_TTL_SECONDES)
+    # Le pointeur AVANT le jeton : un arrêt entre les deux écritures laisse
+    # alors un pointeur vers un jeton inexistant — inoffensif, et rattrapé par
+    # l'appel suivant. L'ordre inverse laisserait un jeton valide qu'aucun
+    # pointeur ne désigne, donc qu'aucune émission ultérieure ne périmerait
+    # (round de correction 2, tâche 14).
     await cache.set(cle_actif, jeton, ex=LIAISON_TTL_SECONDES)
+    await cache.set(f"{_PREFIXE_LIAISON}:{jeton}", str(utilisateur.id), ex=LIAISON_TTL_SECONDES)
     return {
         "lien": f"https://t.me/{settings.telegram_bot_username}?start={jeton}",
         "expire_dans": LIAISON_TTL_SECONDES,
