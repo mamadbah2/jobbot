@@ -15,6 +15,7 @@ from urllib.parse import parse_qs, urlparse
 import pytest
 from fastapi.testclient import TestClient
 
+from src.api import deps
 from src.api.routers import moi
 from src.config import get_settings
 from tests.conftest import FauxCache, FournisseurCourrielEspion, demander_code_verification
@@ -37,6 +38,30 @@ class AlerteEspionne:
 
     async def envoyer(self, evenement: str, **contexte: Any) -> None:
         self.alertes.append((evenement, contexte))
+
+
+class CacheQuiEchoueALaNiemeEcriture(FauxCache):
+    """Simule un arrêt du processus au milieu d'une séquence d'écritures.
+
+    Sert à prouver l'invariant « aucun jeton de liaison valide sans pointeur
+    qui le désigne » en interrompant la requête ENTRE les deux écritures
+    Redis du handler, pas après qu'il ait fini (round de correction 3 :
+    `test_jeton_de_liaison_se_remet_d_un_pointeur_orphelin` ne discriminait
+    pas l'ordre des écritures, seulement la résilience à un pointeur déjà
+    orphelin)."""
+
+    def __init__(self, echouer_a: int) -> None:
+        super().__init__()
+        self.echouer_a = echouer_a
+        self.ecritures = 0
+
+    async def set(
+        self, name: str, value: str, *, ex: int | None = None, nx: bool = False
+    ) -> bool:
+        self.ecritures += 1
+        if self.ecritures == self.echouer_a:
+            raise RuntimeError("arrêt simulé entre les deux écritures")
+        return await super().set(name, value, ex=ex, nx=nx)
 
 
 def _connecter(
@@ -199,3 +224,52 @@ def test_jeton_de_liaison_se_remet_d_un_pointeur_orphelin(
     assert second != premier
     assert f"jobbot:auth:liaison:{premier}" not in faux_cache.valeurs
     assert f"jobbot:auth:liaison:{second}" in faux_cache.valeurs
+
+
+@pytest.mark.integration
+def test_jeton_de_liaison_aucun_jeton_sans_pointeur_meme_interrompu(
+    client_auth: TestClient,
+    fournisseur_courriel_espion: FournisseurCourrielEspion,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Preuve directe de l'invariant : à aucun instant un jeton de liaison
+    valide ne doit exister sans qu'un pointeur le désigne. Contrairement à
+    `test_jeton_de_liaison_se_remet_d_un_pointeur_orphelin` (qui rejoue une
+    requête complète après coup et passerait avec l'ancien ordre
+    d'écriture), ce test interrompt la requête ENTRE les deux écritures
+    Redis du handler — c'est la seule façon de discriminer l'ordre
+    (round de correction 3)."""
+    monkeypatch.setenv("TELEGRAM_BOT_USERNAME", "jobbot_sn_bot")
+    get_settings.cache_clear()
+    _connecter(client_auth, fournisseur_courriel_espion)
+
+    # La 2e écriture du handler échoue : sur un compte fraîchement connecté,
+    # sans jeton de liaison antérieur, `jeton_de_liaison` ne fait qu'une
+    # lecture (`cache.get`, qui ne compte pas) puis exactement deux
+    # écritures — vérifié ci-dessous par `cache_qui_echoue.ecritures == 2`,
+    # pas supposé.
+    cache_qui_echoue = CacheQuiEchoueALaNiemeEcriture(echouer_a=2)
+
+    async def _cache_defaillant() -> Any:
+        yield cache_qui_echoue
+
+    client_auth.app.dependency_overrides[deps.cache_redis] = _cache_defaillant  # type: ignore[attr-defined]
+
+    r = client_auth.post("/moi/telegram/jeton")
+    assert r.status_code == 500  # l'écriture interrompue remonte, pas de succès partiel silencieux
+    assert cache_qui_echoue.ecritures == 2  # confirme QUELLE écriture a échoué
+
+    cles_jetons = [
+        cle for cle in cache_qui_echoue.valeurs if cle.startswith("jobbot:auth:liaison:")
+    ]
+    pointeurs = [
+        valeur
+        for cle, valeur in cache_qui_echoue.valeurs.items()
+        if cle.startswith("jobbot:auth:liaison-actif:")
+    ]
+    # L'invariant à protéger, formulé sans valeur particulière : au plus un
+    # jeton en cache, et s'il existe, un pointeur le désigne bel et bien.
+    assert len(cles_jetons) <= 1
+    for cle in cles_jetons:
+        jeton = cle.removeprefix("jobbot:auth:liaison:")
+        assert jeton in pointeurs
