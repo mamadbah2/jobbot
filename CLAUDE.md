@@ -146,7 +146,11 @@ jobbot/
 │   │   ├── telephone.py       # normalisation E.164 sénégalaise
 │   │   ├── courriel_valide.py # validation + normalisation d'adresse
 │   │   ├── erreurs.py         # exceptions métier, traduites par chaque client
+│   │   ├── saisie.py          # contrôles communs à toute saisie utilisateur (bornes, type)
+│   │   ├── cache.py           # Protocol CacheRedis — le minimum dont `core` a besoin,
+│   │   │                      #   sans dépendre du client `redis` (test d'isolation, tâche 17)
 │   │   └── auth/
+│   │       ├── cles.py        # dérive une clé par usage depuis JWT_SECRET (limite/code/jeton)
 │   │       ├── codes.py       # génération, hachage, vérification du code à 6 chiffres
 │   │       ├── jetons.py      # encodage/décodage JWT + contrôle de token_version
 │   │       ├── limites.py     # garde-fous anti-abus (Redis)
@@ -155,6 +159,7 @@ jobbot/
 │   │   ├── provider.py        # interface FournisseurCourriel
 │   │   └── console.py         # impl. de dev : le code part dans les logs
 │   ├── api/
+│   │   ├── main.py            # entrypoint du process `api` (uvicorn + setup_logging)
 │   │   ├── app.py             # construction de l'app FastAPI
 │   │   ├── deps.py            # session DB, utilisateur courant
 │   │   ├── schemas/           # entrées/sorties pydantic
