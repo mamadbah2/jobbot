@@ -3859,15 +3859,23 @@ fautif de `core/` et le remplacer par un Protocol, ne pas allonger `INTERDITS`.
 ```bash
 ruff check src/ tests/
 ruff format --check src/ tests/
-mypy src/
-pytest -v
-docker compose down -v && docker compose build && docker compose up -d
-sleep 20 && curl -s localhost:8080/health && docker compose ps
-RUN_INTEGRATION_TESTS=1 pytest -m integration -v
+mypy --strict src/
+pytest -q
+RUN_INTEGRATION_TESTS=1 pytest -m integration -q
 ```
 
-Attendu : `ruff` et `mypy` sans erreur, tous les tests au vert, `/health` en `200`, tous les
-services `running` sauf `migrate` (`exited (0)`) et `web` (non démarré, profil désactivé).
+Attendu : `ruff` et `mypy` sans erreur, tous les tests au vert, **zéro avertissement**.
+
+> ⚠️ **La version d'origine de cette étape lançait `docker compose down -v`. Ne le faites
+> jamais ici.** Le drapeau `-v` détruit les volumes, donc la base Postgres entière — schéma
+> migré et les 232 offres ingérées en Phase 1. Cette base est partagée avec le dépôt
+> principal, ce n'est pas un environnement jetable.
+>
+> Par ailleurs `docker compose` est **inutilisable depuis le worktree** : `.env` est gitignoré
+> donc absent, et le projet compose s'appelle `jobbot` — une commande lancée d'ici piloterait
+> les conteneurs partagés. La vérification de la pile en conditions réelles se fait donc
+> ailleurs, dans un environnement disposant de son propre `.env`, et **sans `-v`** :
+> `docker compose up -d --build` suffit à reconstruire et relancer.
 
 - [ ] **Étape 4 : parcours manuel de bout en bout**
 
@@ -3893,11 +3901,43 @@ attendre `COMPTE_LIE`. Re-vérifier `GET /moi` : `telegram_lie` doit être pass�
 `GET /moi` doit rendre **le même `id`** qu'à l'étape 3 — c'est le critère de validation n°2 de
 la spec (aucun doublon entre le web et Telegram).
 
-- [ ] **Étape 5 : mettre la documentation à jour**
+> ⚠️ **Cette étape n'est PAS exécutable depuis le worktree** (pas de `.env`, et `docker compose`
+> y piloterait les conteneurs partagés). Elle décrit la recette manuelle à dérouler par le
+> porteur du projet dans son environnement normal. L'équivalent automatisé — parcours complet
+> demande → vérification → session → liaison — est couvert par les tests d'intégration.
 
-Vérifier que l'arborescence du §4 de `CLAUDE.md` correspond à ce qui existe réellement (§13 :
-« quand tu ajoutes un fichier au projet, mets à jour l'arborescence du §4 »). Ajouter au
-`README.md` une section « Lancer l'API » avec le parcours `curl` de l'étape 4.
+- [ ] **Étape 5 : test d'absence de donnée personnelle dans les logs rendus**
+
+Créer `tests/test_logs_sans_pii.py`. Les tests existants capturent les logs avec
+`structlog.testing.capture_logs()`, qui **vide toute la chaîne de processeurs** : ils vérifient
+les arguments passés au site d'appel, pas ce qui sortirait réellement en JSON. Si quelqu'un
+liait un jour une adresse à un `contextvar` — motif courant de traçage par requête — ces tests
+continueraient de passer pendant que l'adresse fuiterait sur chaque ligne de log.
+
+Le test doit donc exercer le **vrai** pipeline : appeler `setup_logging(json_output=True)`,
+capturer la sortie standard, dérouler un parcours d'authentification complet (demande de code,
+vérification, accès à `/moi`, déconnexion), et vérifier que la sortie JSON rendue ne contient
+**ni l'adresse email, ni le numéro de téléphone, ni le code de vérification, ni le jeton de
+session**. Restaurer la configuration de journalisation en fin de test.
+
+- [ ] **Étape 6 : mettre la documentation à jour**
+
+Vérifier que l'arborescence du §4 de `CLAUDE.md` correspond à ce qui existe réellement (§13).
+**Trois modules y manquent**, nés de décisions prises en cours d'exécution et absents du
+design initial : `src/core/saisie.py`, `src/core/cache.py` et `src/core/auth/cles.py`.
+
+Ajouter au `README.md` une section « Lancer l'API » avec le parcours de l'étape 4, **et une
+liste de contrôle de mise en production** reprenant les points suivants, chacun étant un
+garde-fou inopérant s'il est oublié :
+
+| À poser avant d'ouvrir au public | Pourquoi |
+|---|---|
+| `ENVIRONMENT=prod` | Sans lui, aucun secret JWT n'est exigé et le cookie de session perd son drapeau `Secure` |
+| `JWT_SECRET` d'au moins 32 caractères | Sinon le démarrage échoue en `prod` — c'est voulu |
+| `PROXY_IPS_DE_CONFIANCE` | Sans lui derrière un reverse proxy, le plafond par IP compte tous les utilisateurs ensemble ; avec une valeur trop large, l'IP devient usurpable |
+| `POSTGRES_PASSWORD` explicite | `.env.example` est public et `src/config.py` a une valeur par défaut |
+| Reverse proxy devant `api` | Le service publie son port sur toutes les interfaces ; aucun proxy n'est déclaré dans `docker-compose.yml` |
+| Nom de domaine + SPF/DKIM/DMARC | Aucun email réel ne part sans cela (§14.1) |
 
 - [ ] **Étape 6 : commiter**
 
