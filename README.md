@@ -50,5 +50,6 @@ du déploiement : rien ici ne s'active tout seul.
 | `JWT_SECRET` d'au moins 32 caractères | Sinon le démarrage échoue en `prod` — c'est voulu |
 | `PROXY_IPS_DE_CONFIANCE` | Sans lui derrière un reverse proxy, le plafond par IP compte tous les utilisateurs ensemble ; avec une valeur trop large, l'IP devient usurpable |
 | `POSTGRES_PASSWORD` explicite | `.env.example` est public et `src/config.py` a une valeur par défaut |
+| `FOURNISSEUR_COURRIEL` autre que `console` | Sinon le démarrage échoue en `prod` — `console` écrit le code de vérification en clair dans les logs |
 | Reverse proxy devant `api` | Le service publie son port sur toutes les interfaces ; aucun proxy n'est déclaré dans `docker-compose.yml` |
 | Nom de domaine + SPF/DKIM/DMARC | Aucun email réel ne part sans cela (§14.1) |

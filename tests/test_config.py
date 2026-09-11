@@ -99,8 +99,37 @@ def test_jwt_secret_trop_court_refuse_en_prod(monkeypatch: pytest.MonkeyPatch) -
 def test_jwt_secret_de_32_caracteres_accepte_en_prod(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("ENVIRONMENT", "prod")
     monkeypatch.setenv("JWT_SECRET", "a" * 32)
+    # Sans quoi le défaut FOURNISSEUR_COURRIEL=console refuse le démarrage en
+    # prod (test dédié plus bas) : ce n'est pas ce que ce test vérifie.
+    monkeypatch.setenv("FOURNISSEUR_COURRIEL", "un_fournisseur_reel")
     get_settings.cache_clear()
     assert get_settings().jwt_secret.get_secret_value() == "a" * 32
+
+
+def test_fournisseur_courriel_console_refuse_en_prod(monkeypatch: pytest.MonkeyPatch) -> None:
+    """`console` journalise le code en clair (§2, interdiction n°2) : c'est la
+    valeur par défaut, donc rien ne devait l'empêcher de partir en prod par oubli."""
+    monkeypatch.setenv("ENVIRONMENT", "prod")
+    monkeypatch.setenv("JWT_SECRET", "a" * 32)
+    monkeypatch.delenv("FOURNISSEUR_COURRIEL", raising=False)  # garde le défaut "console"
+    get_settings.cache_clear()
+    with pytest.raises(ValidationError):
+        get_settings()
+
+
+def test_fournisseur_courriel_console_tolere_en_dev(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("ENVIRONMENT", "dev")
+    monkeypatch.delenv("FOURNISSEUR_COURRIEL", raising=False)
+    get_settings.cache_clear()
+    assert get_settings().fournisseur_courriel == "console"
+
+
+def test_fournisseur_courriel_reel_accepte_en_prod(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("ENVIRONMENT", "prod")
+    monkeypatch.setenv("JWT_SECRET", "a" * 32)
+    monkeypatch.setenv("FOURNISSEUR_COURRIEL", "un_fournisseur_reel")
+    get_settings.cache_clear()
+    assert get_settings().fournisseur_courriel == "un_fournisseur_reel"
 
 
 def test_garde_fous_auth_valeurs_par_defaut() -> None:
@@ -120,6 +149,9 @@ def test_cookie_secure_suit_l_environnement(monkeypatch: pytest.MonkeyPatch) -> 
     assert get_settings().cookie_session_secure is False
     monkeypatch.setenv("ENVIRONMENT", "prod")
     monkeypatch.setenv("JWT_SECRET", "secret_de_test_avec_trente_deux_caracteres_ou_plus")
+    # Sans quoi le défaut FOURNISSEUR_COURRIEL=console refuse le démarrage en
+    # prod (test dédié plus haut) : ce n'est pas ce que ce test vérifie.
+    monkeypatch.setenv("FOURNISSEUR_COURRIEL", "un_fournisseur_reel")
     get_settings.cache_clear()
     assert get_settings().cookie_session_secure is True
 

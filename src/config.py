@@ -157,6 +157,21 @@ class Settings(BaseSettings):
             )
         return self
 
+    @model_validator(mode="after")
+    def _interdire_le_fournisseur_console_en_prod(self) -> Settings:
+        """`console` écrit le code de vérification dans les logs en clair
+        (`src/courriel/console.py`) : quiconque lit les logs peut ouvrir
+        n'importe quelle session. C'est la valeur par défaut, donc rien ne
+        l'empêchait auparavant de partir en production par simple oubli."""
+        if self.is_prod and self.fournisseur_courriel == "console":
+            raise ValueError(
+                "FOURNISSEUR_COURRIEL=console est interdit en production : le code "
+                "de vérification part en clair dans les logs, ce qui permet "
+                "d'ouvrir n'importe quelle session. Configurez un fournisseur "
+                "d'envoi réel avant de déployer."
+            )
+        return self
+
 
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:
