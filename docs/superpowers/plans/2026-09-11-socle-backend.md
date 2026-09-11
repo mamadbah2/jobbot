@@ -3858,13 +3858,19 @@ fautif de `core/` et le remplacer par un Protocol, ne pas allonger `INTERDITS`.
 
 ```bash
 ruff check src/ tests/
-ruff format --check src/ tests/
 mypy --strict src/
 pytest -q
 RUN_INTEGRATION_TESTS=1 pytest -m integration -q
 ```
 
 Attendu : `ruff` et `mypy` sans erreur, tous les tests au vert, **zéro avertissement**.
+
+> **`ruff format --check` a été retiré de cette étape.** Il y figurait par erreur : le projet ne
+> l'a jamais adopté — `pyproject.toml` ne configure aucun réglage de formateur, et `CLAUDE.md`
+> ne le mentionne pas. La norme réelle est `ruff check` avec les règles `E, F, I, B, UP, SIM`.
+> Mesuré le 2026-09-11 : 18 fichiers divergeraient du style de `ruff format`, dont 11 créés par
+> cette phase et 7 antérieurs. Adopter un formateur est une décision de style qui appartient au
+> porteur du projet ; la prendre ici reformaterait du code déjà relu, sans valeur fonctionnelle.
 
 > ⚠️ **La version d'origine de cette étape lançait `docker compose down -v`. Ne le faites
 > jamais ici.** Le drapeau `-v` détruit les volumes, donc la base Postgres entière — schéma
