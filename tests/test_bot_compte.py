@@ -10,7 +10,7 @@ from aiogram.types import Chat, Contact, Message, ReplyKeyboardRemove, User
 
 from src.bot import texts
 from src.bot.handlers.compte import contact_recu, verifier_contact
-from src.core.erreurs import CompteInexistant, ContactUsurpe, TelegramDejaLie
+from src.core.erreurs import CompteInexistant, ContactUsurpe, NumeroInvalide, TelegramDejaLie
 
 
 class FauxContact:
@@ -54,6 +54,22 @@ class _FausseSession:
     `session_scope`, qu'on neutralise via monkeypatch dans chaque test."""
 
 
+class _FauxScope:
+    """Contexte async bidon substitué à `session_scope` dans les tests de
+    handler : seul le comportement de `comptes.*` (monkeypatché à côté)
+    compte, pas une vraie transaction."""
+
+    async def __aenter__(self) -> _FausseSession:
+        return _FausseSession()
+
+    async def __aexit__(self, *exc: object) -> None:
+        return None
+
+
+def _patch_session_scope(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("src.bot.handlers.compte.session_scope", lambda: _FauxScope())
+
+
 async def test_contact_usurpe_refuse_sans_toucher_la_base(monkeypatch: pytest.MonkeyPatch) -> None:
     answer = AsyncMock()
     monkeypatch.setattr(Message, "answer", answer)
@@ -81,15 +97,7 @@ async def test_compte_deja_lie_ne_relie_pas(monkeypatch: pytest.MonkeyPatch) -> 
     )
     lier = AsyncMock(side_effect=AssertionError("ne doit pas être appelé"))
     monkeypatch.setattr("src.bot.handlers.compte.comptes.lier_telegram", lier)
-
-    class _FauxScope:
-        async def __aenter__(self) -> _FausseSession:
-            return _FausseSession()
-
-        async def __aexit__(self, *exc: object) -> None:
-            return None
-
-    monkeypatch.setattr("src.bot.handlers.compte.session_scope", lambda: _FauxScope())
+    _patch_session_scope(monkeypatch)
 
     message = _message_avec_contact(numero="+221771234567", contact_user_id=555, expediteur_id=555)
     await contact_recu(message)
@@ -109,15 +117,7 @@ async def test_compte_introuvable(monkeypatch: pytest.MonkeyPatch) -> None:
         "src.bot.handlers.compte.comptes.lier_telegram",
         AsyncMock(side_effect=CompteInexistant(CompteInexistant.code)),
     )
-
-    class _FauxScope:
-        async def __aenter__(self) -> _FausseSession:
-            return _FausseSession()
-
-        async def __aexit__(self, *exc: object) -> None:
-            return None
-
-    monkeypatch.setattr("src.bot.handlers.compte.session_scope", lambda: _FauxScope())
+    _patch_session_scope(monkeypatch)
 
     message = _message_avec_contact(numero="+221771234567", contact_user_id=555, expediteur_id=555)
     await contact_recu(message)
@@ -139,19 +139,36 @@ async def test_telegram_deja_pris_par_un_autre_compte(monkeypatch: pytest.Monkey
         "src.bot.handlers.compte.comptes.lier_telegram",
         AsyncMock(side_effect=TelegramDejaLie(TelegramDejaLie.code)),
     )
-
-    class _FauxScope:
-        async def __aenter__(self) -> _FausseSession:
-            return _FausseSession()
-
-        async def __aexit__(self, *exc: object) -> None:
-            return None
-
-    monkeypatch.setattr("src.bot.handlers.compte.session_scope", lambda: _FauxScope())
+    _patch_session_scope(monkeypatch)
 
     message = _message_avec_contact(numero="+221771234567", contact_user_id=555, expediteur_id=555)
     await contact_recu(message)
 
     answer.assert_awaited_once()
     assert answer.await_args.args[0] == texts.COMPTE_TELEGRAM_DEJA_PRIS
+    assert isinstance(answer.await_args.kwargs["reply_markup"], ReplyKeyboardRemove)
+
+
+async def test_numero_etranger_recoit_une_reponse(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Round de correction 1 : un numéro non sénégalais (diaspora, SIM
+    malienne/ivoirienne...) fait lever `NumeroInvalide` par
+    `comptes.lier_telegram` (via `telephone.normaliser`). Sans ce `except`,
+    l'exception remontait et l'utilisateur ne recevait aucune réponse — §7,
+    ne jamais échouer en silence."""
+    answer = AsyncMock()
+    monkeypatch.setattr(Message, "answer", answer)
+    monkeypatch.setattr(
+        "src.bot.handlers.compte.comptes.par_telegram", AsyncMock(return_value=None)
+    )
+    monkeypatch.setattr(
+        "src.bot.handlers.compte.comptes.lier_telegram",
+        AsyncMock(side_effect=NumeroInvalide("numero_hors_senegal")),
+    )
+    _patch_session_scope(monkeypatch)
+
+    message = _message_avec_contact(numero="+33612345678", contact_user_id=555, expediteur_id=555)
+    await contact_recu(message)
+
+    answer.assert_awaited_once()
+    assert answer.await_args.args[0] == texts.COMPTE_NUMERO_ETRANGER
     assert isinstance(answer.await_args.kwargs["reply_markup"], ReplyKeyboardRemove)

@@ -20,7 +20,7 @@ from aiogram.types import Message, ReplyKeyboardRemove
 
 from src.bot import keyboards, texts
 from src.core.auth import comptes
-from src.core.erreurs import CompteInexistant, ContactUsurpe, TelegramDejaLie
+from src.core.erreurs import CompteInexistant, ContactUsurpe, NumeroInvalide, TelegramDejaLie
 from src.db.session import session_scope
 from src.logging_setup import get_logger
 
@@ -57,8 +57,10 @@ async def contact_recu(message: Message) -> None:
     try:
         numero = verifier_contact(message.contact, message.from_user.id)
     except ContactUsurpe:
-        # Ni numéro ni identifiant Telegram dans le log (points d'attention §16).
-        log.warning("contact_usurpe")
+        # `message.from_user.id` est l'identifiant de l'attaquant présumé, pas
+        # de la victime : le journaliser permet de corréler des tentatives
+        # répétées, sans exposer le numéro (donnée personnelle, §14.4).
+        log.warning("contact_usurpe", telegram_id=message.from_user.id)
         await message.answer(
             texts.COMPTE_CONTACT_REFUSE, reply_markup=ReplyKeyboardRemove()
         )
@@ -82,6 +84,13 @@ async def contact_recu(message: Message) -> None:
             log.warning("telegram_deja_lie")
             await message.answer(
                 texts.COMPTE_TELEGRAM_DEJA_PRIS, reply_markup=ReplyKeyboardRemove()
+            )
+            return
+        except NumeroInvalide:
+            # Numéro étranger (diaspora, SIM malienne/ivoirienne...) : §7,
+            # ne jamais échouer en silence.
+            await message.answer(
+                texts.COMPTE_NUMERO_ETRANGER, reply_markup=ReplyKeyboardRemove()
             )
             return
 

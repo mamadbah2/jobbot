@@ -74,4 +74,10 @@ COMPTE_TELEGRAM_DEJA_PRIS: Final = (
     "Si c'est une erreur, répondez à ce message."
 )
 
+COMPTE_NUMERO_ETRANGER: Final = (
+    "Je ne reconnais que les numéros sénégalais pour le moment.\n"
+    "Si vous avez un numéro sénégalais, partagez-le depuis le compte Telegram "
+    "qui l'utilise."
+)
+
 BTN_PARTAGER_CONTACT: Final = "📱 Partager mon numéro"
