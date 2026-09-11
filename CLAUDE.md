@@ -233,7 +233,8 @@ Tables minimales (à créer via Alembic, pas de `create_all` en prod) :
 > second cycle de jetons (§2.5). Prix assumé : un jeton volé reste valable jusqu'à révocation.
 
 > **Le code de vérification ne touche jamais Postgres.** Il vit en Redis, haché en HMAC-SHA256,
-> TTL 5 minutes, avec son compteur d'essais.
+> TTL 5 minutes. Pas de compteur d'essais sur le code lui-même : c'est le plafond de cadence
+> par adresse (`auth_verifications_par_heure`, `src/config.py`) qui protège contre la force brute.
 
 **`profiles`** — `user_id` FK, `raw_cv_text`, `structured` (JSONB : expériences, formations, compétences, langues, secteurs visés, mobilité, prétention salariale), `cv_file_path`, `updated_at`
 

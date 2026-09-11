@@ -4,9 +4,16 @@
 « le défaut serveur n'était là que pour remplir les lignes existantes ; la
 valeur vient du modèle SQLAlchemy ensuite. » C'était une erreur (revue finale
 de la Phase 2, corrections mineures) : un INSERT hors ORM (script ad hoc,
-migration de données future) violerait `NOT NULL` au lieu d'hériter
-silencieusement de 0, comme n'importe quelle autre colonne à défaut de ce
-fichier (`language`, `state`).
+migration de données future) violerait `NOT NULL` faute de valeur, plutôt que
+d'hériter silencieusement de 0 comme le fait cette migration.
+
+`language` et `state` (`src/db/models.py`) n'offrent PAS cette protection :
+vérifié en base (`information_schema.columns.column_default` est vide pour
+les deux), leur défaut n'existe que côté modèle SQLAlchemy (`default=`), pas
+en base. Un INSERT hors ORM omettant `language` ou `state` violerait donc
+`NOT NULL` exactement comme `token_version` avant cette migration — ce n'est
+pas corrigé ici, seule `token_version` l'est, faute d'un besoin identifié
+pour les deux autres à ce jour.
 
 Revision ID: a1c2e3f40003
 Revises: a1c2e3f40002

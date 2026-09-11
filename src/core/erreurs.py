@@ -62,7 +62,7 @@ class CodeInvalide(ErreurMetier):
 
 
 class CodeExpire(ErreurMetier):
-    """Code absent de Redis : expiré, jamais demandé, ou détruit après trop d'essais."""
+    """Code absent de Redis : expiré, ou jamais demandé."""
 
     code = "code_expire"
 
