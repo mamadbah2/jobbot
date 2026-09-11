@@ -60,7 +60,6 @@ class Settings(BaseSettings):
 
     # Le code vit en Redis, haché, et expire tout seul (§2, interdiction n°2).
     code_ttl_secondes: int = Field(default=300, ge=60)
-    code_essais_max: int = Field(default=5, ge=1)
 
     # Garde-fous de l'envoi. L'endpoint est public : non protégé, il permet
     # d'inonder l'adresse d'un tiers et de brûler la réputation du domaine (§7).
@@ -71,11 +70,9 @@ class Settings(BaseSettings):
     auth_plafond_global_jour: int = Field(default=500, ge=1)
 
     # Plafonds de /auth/code/verifie (pas de cooldown : un utilisateur qui se
-    # trompe de chiffre doit pouvoir recommencer tout de suite). Le compteur
-    # d'essais de `codes.verifier` détruit le code au bout de cinq échecs ;
-    # ceci borne la CADENCE de tentatives, pour empêcher un martèlement
-    # parallèle de grappiller des essais dans la fenêtre de course entre
-    # l'incrément du compteur et la destruction du code.
+    # trompe de chiffre doit pouvoir recommencer tout de suite). C'est la
+    # SEULE protection contre la force brute : `codes.verifier` ne détruit
+    # plus le code sur échec (voir `src/core/auth/codes.py` pour pourquoi).
     auth_verifications_par_heure: int = Field(default=20, ge=1)
     auth_verifications_par_ip_heure: int = Field(default=60, ge=1)
 

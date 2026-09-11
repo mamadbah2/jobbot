@@ -106,7 +106,6 @@ def test_jwt_secret_de_32_caracteres_accepte_en_prod(monkeypatch: pytest.MonkeyP
 def test_garde_fous_auth_valeurs_par_defaut() -> None:
     settings = get_settings()
     assert settings.code_ttl_secondes == 300
-    assert settings.code_essais_max == 5
     assert settings.auth_cooldown_secondes == 60
     assert settings.auth_envois_par_heure == 3
     assert settings.auth_envois_par_jour == 10

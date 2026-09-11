@@ -178,7 +178,6 @@ async def verifier_code(
             adresse,
             corps.code,
             secret=cles.deriver(secret_brut, "code"),
-            essais_max=settings.code_essais_max,
         )
     except CodeInvalide:
         # Le code existait et il est faux : c'est une tentative de devinette,

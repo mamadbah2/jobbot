@@ -27,7 +27,7 @@ def test_codes_successifs_differents() -> None:
 
 async def test_depot_puis_verification_reussie(faux_cache: FauxCache) -> None:
     await codes.deposer(faux_cache, ADRESSE, "123456", secret=SECRET, ttl_secondes=300)
-    await codes.verifier(faux_cache, ADRESSE, "123456", secret=SECRET, essais_max=5)
+    await codes.verifier(faux_cache, ADRESSE, "123456", secret=SECRET)
 
 
 async def test_le_code_en_clair_n_est_jamais_stocke(faux_cache: FauxCache) -> None:
@@ -40,35 +40,37 @@ async def test_le_code_en_clair_n_est_jamais_stocke(faux_cache: FauxCache) -> No
 async def test_mauvais_code_refuse(faux_cache: FauxCache) -> None:
     await codes.deposer(faux_cache, ADRESSE, "123456", secret=SECRET, ttl_secondes=300)
     with pytest.raises(CodeInvalide):
-        await codes.verifier(faux_cache, ADRESSE, "000000", secret=SECRET, essais_max=5)
+        await codes.verifier(faux_cache, ADRESSE, "000000", secret=SECRET)
 
 
 async def test_aucun_code_depose(faux_cache: FauxCache) -> None:
     with pytest.raises(CodeExpire):
-        await codes.verifier(faux_cache, ADRESSE, "123456", secret=SECRET, essais_max=5)
-
-
-async def test_code_detruit_apres_cinq_essais(faux_cache: FauxCache) -> None:
-    await codes.deposer(faux_cache, ADRESSE, "123456", secret=SECRET, ttl_secondes=300)
-    for _ in range(5):
-        with pytest.raises(CodeInvalide):
-            await codes.verifier(faux_cache, ADRESSE, "000000", secret=SECRET, essais_max=5)
-    # Le bon code ne doit plus marcher : le code a été détruit, pas seulement compté.
-    with pytest.raises(CodeExpire):
-        await codes.verifier(faux_cache, ADRESSE, "123456", secret=SECRET, essais_max=5)
+        await codes.verifier(faux_cache, ADRESSE, "123456", secret=SECRET)
 
 
 async def test_code_consomme_apres_succes(faux_cache: FauxCache) -> None:
     """Un code doit être à usage unique."""
     await codes.deposer(faux_cache, ADRESSE, "123456", secret=SECRET, ttl_secondes=300)
-    await codes.verifier(faux_cache, ADRESSE, "123456", secret=SECRET, essais_max=5)
+    await codes.verifier(faux_cache, ADRESSE, "123456", secret=SECRET)
     with pytest.raises(CodeExpire):
-        await codes.verifier(faux_cache, ADRESSE, "123456", secret=SECRET, essais_max=5)
+        await codes.verifier(faux_cache, ADRESSE, "123456", secret=SECRET)
 
 
 async def test_deux_adresses_ne_se_melangent_pas(faux_cache: FauxCache) -> None:
     await codes.deposer(faux_cache, "a@example.sn", "111111", secret=SECRET, ttl_secondes=300)
     await codes.deposer(faux_cache, "b@example.sn", "222222", secret=SECRET, ttl_secondes=300)
     with pytest.raises(CodeInvalide):
-        await codes.verifier(faux_cache, "a@example.sn", "222222", secret=SECRET, essais_max=5)
-    await codes.verifier(faux_cache, "b@example.sn", "222222", secret=SECRET, essais_max=5)
+        await codes.verifier(faux_cache, "a@example.sn", "222222", secret=SECRET)
+    await codes.verifier(faux_cache, "b@example.sn", "222222", secret=SECRET)
+
+
+async def test_dix_essais_faux_le_bon_code_marche_encore(faux_cache: FauxCache) -> None:
+    """Non-régression bloquant 1 : un tiers qui connaît l'adresse ne doit pas
+    pouvoir détruire le code de la victime en enchaînant des essais bidon.
+    Seuls les plafonds de cadence (§10, `auth_verifications_par_heure`)
+    protègent désormais contre la force brute — jamais la destruction du code."""
+    await codes.deposer(faux_cache, ADRESSE, "123456", secret=SECRET, ttl_secondes=300)
+    for _ in range(10):
+        with pytest.raises(CodeInvalide):
+            await codes.verifier(faux_cache, ADRESSE, "000000", secret=SECRET)
+    await codes.verifier(faux_cache, ADRESSE, "123456", secret=SECRET)
