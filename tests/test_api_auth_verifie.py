@@ -25,13 +25,17 @@ def _code(client: TestClient, espion: FournisseurCourrielEspion, adresse: str = 
 
 
 @pytest.fixture(autouse=True)
-def _sans_cooldown_demande(monkeypatch: pytest.MonkeyPatch) -> None:
+def _sans_garde_fous_demande(monkeypatch: pytest.MonkeyPatch) -> None:
     """Plusieurs tests de ce module (reconnexion, plafond de vérification par
-    IP) enchaînent plusieurs `/auth/code/demande` pour la même adresse dans un
-    même test. Le cooldown de cet endpoint (§10, garde-fou distinct du
-    plafond de VÉRIFICATION testé ici) n'a pas sa place dans ces scénarios.
+    adresse et par IP) enchaînent plusieurs `/auth/code/demande` pour la même
+    adresse dans un même test. Les garde-fous de cet endpoint (§10, cooldown
+    et quotas d'ENVOI, distincts du plafond de VÉRIFICATION testé ici)
+    n'ont pas leur place dans ces scénarios.
     """
     monkeypatch.setenv("AUTH_COOLDOWN_SECONDES", "0")
+    monkeypatch.setenv("AUTH_ENVOIS_PAR_HEURE", "1000")
+    monkeypatch.setenv("AUTH_ENVOIS_PAR_JOUR", "1000")
+    monkeypatch.setenv("AUTH_ENVOIS_PAR_IP_HEURE", "1000")
     get_settings.cache_clear()
 
 
@@ -167,14 +171,20 @@ def test_code_a_usage_unique(
 def test_plafond_verifications_par_adresse(
     client_auth: TestClient, fournisseur_courriel_espion: FournisseurCourrielEspion
 ) -> None:
-    """Au-delà du plafond par adresse, l'endpoint répond 429 — même avec un
-    bon code : le compteur d'essais de `codes.verifier` borne les échecs, pas
-    la cadence des tentatives (amendement 2)."""
+    """Au-delà du plafond par adresse, l'endpoint répond 429 — mais seulement
+    quand la tentative porte sur un code qui existe vraiment et qu'il est
+    faux (round de correction 1) : chaque itération redépose un vrai code
+    puis le rate avec un mauvais, pour que chaque tentative lève bien
+    `CodeInvalide` (la seule chose qui consomme ce plafond), pas `CodeExpire`.
+    """
     plafond = get_settings().auth_verifications_par_heure
     for _ in range(plafond):
-        client_auth.post(
+        _code(client_auth, fournisseur_courriel_espion)
+        r = client_auth.post(
             "/auth/code/verifie", json={"email": ADRESSE, "code": "000000", "telephone": TEL}
         )
+        assert r.json()["erreur"] == "code_invalide"
+    _code(client_auth, fournisseur_courriel_espion)
     r = client_auth.post(
         "/auth/code/verifie", json={"email": ADRESSE, "code": "000000", "telephone": TEL}
     )
@@ -182,11 +192,37 @@ def test_plafond_verifications_par_adresse(
 
 
 @pytest.mark.integration
+def test_code_expire_ne_consomme_pas_le_plafond_par_adresse(
+    client_auth: TestClient, fournisseur_courriel_espion: FournisseurCourrielEspion
+) -> None:
+    """Preuve du correctif (round de correction 1) : un tiers qui connaît
+    l'adresse d'une victime mais n'a jamais reçu de code ne doit rien pouvoir
+    lui consommer. Sinon connaître un email suffirait à bloquer les
+    connexions de son propriétaire pendant une heure."""
+    plafond = get_settings().auth_verifications_par_heure
+    for _ in range(plafond):
+        r = client_auth.post(
+            "/auth/code/verifie", json={"email": ADRESSE, "code": "000000", "telephone": TEL}
+        )
+        assert r.status_code == 400
+        assert r.json()["erreur"] == "code_expire"
+    # La victime peut toujours vérifier son propre code après coup : son
+    # quota par adresse n'a pas été entamé par les tentatives d'un tiers.
+    code = _code(client_auth, fournisseur_courriel_espion)
+    r = client_auth.post(
+        "/auth/code/verifie",
+        json={"email": ADRESSE, "code": code, "telephone": TEL, "nom_complet": "Fatou"},
+    )
+    assert r.status_code == 200
+
+
+@pytest.mark.integration
 def test_plafond_verifications_par_ip(
     client_auth: TestClient, fournisseur_courriel_espion: FournisseurCourrielEspion
 ) -> None:
     """Le plafond par IP protège même quand l'attaquant change d'adresse à
-    chaque tentative."""
+    chaque tentative — et même sans code en cours pour aucune d'elles,
+    puisqu'il est indexé sur la seule IP (round de correction 1)."""
     plafond = get_settings().auth_verifications_par_ip_heure
     for i in range(plafond):
         client_auth.post(

@@ -11,15 +11,7 @@ from structlog.testing import capture_logs
 
 from src.api import deps
 from src.api.app import create_app
-from tests.conftest import FauxCache
-
-
-class FournisseurEspion:
-    def __init__(self) -> None:
-        self.envois: list[tuple[str, str]] = []
-
-    async def envoyer_code(self, destinataire: str, code: str) -> None:
-        self.envois.append((destinataire, code))
+from tests.conftest import FauxCache, FournisseurCourrielEspion
 
 
 class FournisseurEnPanne:
@@ -47,12 +39,14 @@ class AlerteEspionne:
 
 
 @pytest.fixture
-def espion() -> FournisseurEspion:
-    return FournisseurEspion()
-
-
-@pytest.fixture
-def client(espion: FournisseurEspion, faux_cache: FauxCache) -> Iterator[TestClient]:
+def client(
+    fournisseur_courriel_espion: FournisseurCourrielEspion, faux_cache: FauxCache
+) -> Iterator[TestClient]:
+    """N'utilise PAS `client_auth`/`base_utilisateurs_test` de `conftest.py` :
+    ce fixture partagé purge la base à sa création, ce qui forcerait ces tests
+    (actuellement non marqués `integration`, car `/auth/code/demande` ne
+    dépend jamais de `deps.session_db`) à exiger un Postgres réel. Seul
+    `fournisseur_courriel_espion` (qui ne touche rien) est repris d'ici."""
     from src.api.routers import auth
 
     app = create_app()
@@ -61,30 +55,36 @@ def client(espion: FournisseurEspion, faux_cache: FauxCache) -> Iterator[TestCli
         yield faux_cache
 
     app.dependency_overrides[deps.cache_redis] = _cache
-    app.dependency_overrides[auth.fournisseur] = lambda: espion
+    app.dependency_overrides[auth.fournisseur] = lambda: fournisseur_courriel_espion
     with TestClient(app, raise_server_exceptions=False) as c:
         yield c
 
 
-def test_demande_acceptee(client: TestClient, espion: FournisseurEspion) -> None:
+def test_demande_acceptee(
+    client: TestClient, fournisseur_courriel_espion: FournisseurCourrielEspion
+) -> None:
     reponse = client.post("/auth/code/demande", json={"email": "fatou@example.sn"})
     assert reponse.status_code == 202
-    assert len(espion.envois) == 1
-    destinataire, code = espion.envois[0]
+    assert len(fournisseur_courriel_espion.envois) == 1
+    destinataire, code = fournisseur_courriel_espion.envois[0]
     assert destinataire == "fatou@example.sn"
     assert len(code) == 6 and code.isdigit()
 
 
-def test_adresse_normalisee_avant_envoi(client: TestClient, espion: FournisseurEspion) -> None:
+def test_adresse_normalisee_avant_envoi(
+    client: TestClient, fournisseur_courriel_espion: FournisseurCourrielEspion
+) -> None:
     client.post("/auth/code/demande", json={"email": "  Fatou@EXAMPLE.SN "})
-    assert espion.envois[0][0] == "Fatou@example.sn"
+    assert fournisseur_courriel_espion.envois[0][0] == "Fatou@example.sn"
 
 
-def test_adresse_invalide_refusee(client: TestClient, espion: FournisseurEspion) -> None:
+def test_adresse_invalide_refusee(
+    client: TestClient, fournisseur_courriel_espion: FournisseurCourrielEspion
+) -> None:
     reponse = client.post("/auth/code/demande", json={"email": "pas-une-adresse"})
     assert reponse.status_code == 422
     assert reponse.json()["erreur"] == "adresse_invalide"
-    assert espion.envois == []
+    assert fournisseur_courriel_espion.envois == []
 
 
 def test_reponse_identique_pour_adresse_connue_ou_non(client: TestClient) -> None:

@@ -24,9 +24,10 @@ from src.core.auth.limites import (
     ReglesVerification,
     autoriser_envoi,
     autoriser_verification,
+    compter_code_invalide,
 )
 from src.core.cache import CacheRedis
-from src.core.erreurs import EnvoiImpossible, InscriptionIncomplete
+from src.core.erreurs import CodeInvalide, EnvoiImpossible, InscriptionIncomplete
 from src.courriel.provider import FournisseurCourriel, construire_fournisseur
 from src.db.models import User
 from src.logging_setup import get_logger
@@ -166,27 +167,30 @@ async def verifier_code(
     secret_brut = settings.jwt_secret.get_secret_value()
     adresse = courriel_valide.normaliser(corps.email)
     ip = request.client.host if request.client else "inconnue"
+    cle_limite = cles.deriver(secret_brut, "limite")
+    regles = _regles_verification(settings)
 
-    # Le compteur d'essais de `codes.verifier` détruit le code au bout de cinq
-    # échecs, mais il ne borne pas la CADENCE : en parallèle, un attaquant peut
-    # glisser des tentatives dans la fenêtre entre l'incrément du compteur et
-    # la destruction du code. Ce plafond, distinct, borne le nombre total de
-    # tentatives.
-    await autoriser_verification(
-        cache,
-        adresse=adresse,
-        ip=ip,
-        regles=_regles_verification(settings),
-        secret=cles.deriver(secret_brut, "limite"),
-    )
+    # Plafond de CADENCE, indexé sur la seule IP : consommé avant toute preuve
+    # de possession de l'adresse, un compteur par adresse ici permettrait à
+    # n'importe qui connaissant l'email d'une victime de bloquer ses
+    # connexions en la martelant avec des codes bidon (round de correction 1).
+    await autoriser_verification(cache, ip=ip, regles=regles, secret=cle_limite)
 
-    await codes.verifier(
-        cache,
-        adresse,
-        corps.code,
-        secret=cles.deriver(secret_brut, "code"),
-        essais_max=settings.code_essais_max,
-    )
+    try:
+        await codes.verifier(
+            cache,
+            adresse,
+            corps.code,
+            secret=cles.deriver(secret_brut, "code"),
+            essais_max=settings.code_essais_max,
+        )
+    except CodeInvalide:
+        # Le code existait et il est faux : c'est une tentative de devinette,
+        # elle compte contre le plafond par adresse. Un code absent
+        # (`CodeExpire`) ne consomme rien : sinon un tiers pourrait épuiser le
+        # quota d'une victime sans rien posséder (round de correction 1).
+        await compter_code_invalide(cache, adresse=adresse, regles=regles, secret=cle_limite)
+        raise
 
     try:
         utilisateur = await comptes.connecter_ou_inscrire(

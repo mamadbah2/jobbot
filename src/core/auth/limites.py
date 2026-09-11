@@ -128,22 +128,34 @@ class ReglesVerification:
 
 
 async def autoriser_verification(
-    cache: CacheRedis, *, adresse: str, ip: str, regles: ReglesVerification, secret: str
+    cache: CacheRedis, *, ip: str, regles: ReglesVerification, secret: str
 ) -> None:
-    """Ne rend rien si la tentative est permise ; lève `TropDeDemandes` sinon.
+    """Borne la CADENCE des tentatives venant d'une même origine réseau.
 
-    Le compteur d'essais de `codes.verifier` détruit le code au bout de cinq
-    échecs, mais il ne borne pas la CADENCE : en parallèle, un attaquant peut
-    glisser des tentatives dans la fenêtre entre l'incrément du compteur et la
-    destruction du code. Ce plafond borne le nombre total de tentatives, donc
-    le nombre de coups portés sur un espace de six chiffres.
+    Volontairement indexé sur la seule IP, et non sur l'adresse : un compteur
+    par adresse consommé avant toute preuve de possession permettrait à
+    n'importe qui connaissant l'email d'une victime de bloquer ses connexions
+    en envoyant des codes bidon. Le plafond par adresse existe aussi, mais il
+    ne se consomme que sur un code réellement faux (`compter_code_invalide`).
     """
-    empreinte = _empreinte(adresse, secret)
-    heure = await _incrementer(cache, f"{_PREFIXE}:vh:{empreinte}:{_fenetre_heure()}", _HEURE)
-    if heure > regles.par_heure:
-        raise TropDeDemandes(attendre_secondes=_HEURE)
     ip_heure = await _incrementer(
         cache, f"{_PREFIXE}:vip:{_empreinte(ip, secret)}:{_fenetre_heure()}", _HEURE
     )
     if ip_heure > regles.par_ip_heure:
+        raise TropDeDemandes(attendre_secondes=_HEURE)
+
+
+async def compter_code_invalide(
+    cache: CacheRedis, *, adresse: str, regles: ReglesVerification, secret: str
+) -> None:
+    """Compte un échec sur un code qui existait vraiment, et plafonne.
+
+    N'est appelé qu'après un `CodeInvalide` : une tentative contre une adresse
+    sans code en cours ne consomme donc rien, ce qui ôte tout intérêt à
+    marteler l'adresse d'autrui.
+    """
+    heure = await _incrementer(
+        cache, f"{_PREFIXE}:vh:{_empreinte(adresse, secret)}:{_fenetre_heure()}", _HEURE
+    )
+    if heure > regles.par_heure:
         raise TropDeDemandes(attendre_secondes=_HEURE)
