@@ -13,26 +13,28 @@ from __future__ import annotations
 
 import phonenumbers
 
+from src.core.erreurs import NumeroInvalide
+
 REGION = "SN"
 
 
 def normaliser(numero: str) -> str:
-    """Rend le numéro au format E.164, ou lève `ValueError`."""
+    """Rend le numéro au format E.164, ou lève `NumeroInvalide`."""
     brut = numero.strip()
     if not brut:
-        raise ValueError("numero_vide")
+        raise NumeroInvalide("numero_vide")
 
     try:
         analyse = phonenumbers.parse(brut, REGION)
     except phonenumbers.NumberParseException as exc:
-        raise ValueError("numero_illisible") from exc
+        raise NumeroInvalide("numero_illisible") from exc
 
     if not phonenumbers.is_valid_number(analyse):
-        raise ValueError("numero_invalide")
+        raise NumeroInvalide("numero_invalide")
 
     # `parse` avec une région de repli accepte un numéro étranger écrit en
     # international : on revérifie explicitement le pays.
     if phonenumbers.region_code_for_number(analyse) != REGION:
-        raise ValueError("numero_hors_senegal")
+        raise NumeroInvalide("numero_hors_senegal")
 
     return phonenumbers.format_number(analyse, phonenumbers.PhoneNumberFormat.E164)

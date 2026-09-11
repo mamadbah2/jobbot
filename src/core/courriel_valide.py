@@ -14,16 +14,18 @@ from __future__ import annotations
 
 from email_validator import EmailNotValidError, validate_email
 
+from src.core.erreurs import AdresseInvalide
+
 
 def normaliser(adresse: str) -> str:
-    """Rend l'adresse normalisée, ou lève `ValueError`."""
+    """Rend l'adresse normalisée, ou lève `AdresseInvalide`."""
     brut = adresse.strip()
     if not brut:
-        raise ValueError("adresse_vide")
+        raise AdresseInvalide("adresse_vide")
 
     try:
         resultat = validate_email(brut, check_deliverability=False)
     except EmailNotValidError as exc:
-        raise ValueError("adresse_invalide") from exc
+        raise AdresseInvalide("adresse_invalide") from exc
 
     return str(resultat.normalized)
