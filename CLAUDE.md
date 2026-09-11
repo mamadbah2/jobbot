@@ -7,7 +7,9 @@
 
 ## 1. Mission
 
-Bot Telegram qui centralise les offres d'emploi du marché sénégalais, repère celles qui correspondent au profil de l'utilisateur, et prépare pour chacune un CV adapté + une lettre de motivation via IA. **C'est l'utilisateur qui dépose sa candidature**, jamais le bot.
+Service qui centralise les offres d'emploi du marché sénégalais, repère celles qui correspondent au profil de l'utilisateur, et prépare pour chacune un CV adapté + une lettre de motivation via IA. **C'est l'utilisateur qui dépose sa candidature**, jamais le service.
+
+Accessible par **une application web (et PWA mobile)** et par un **bot Telegram**, tous deux au-dessus du même backend. Le bot était l'unique interface jusqu'au 2026-09-11 ; il reste un client de plein droit, mais ce n'est plus le seul.
 
 Modèle économique : abonnement mensuel ~1 000 FCFA, payé en mobile money (Wave / Orange Money / Free Money).
 
@@ -21,7 +23,11 @@ Ces points ont été tranchés par le porteur du projet. Ne les remets pas en qu
 
 | Décision | Statut |
 |---|---|
-| Interface = **Telegram** uniquement | Figé |
+| Architecture = **couche métier + API**, plusieurs clients | Figé le 2026-09-11 |
+| Premier client = **web (Next.js, PWA)** ; Telegram remis à niveau ensuite | Figé le 2026-09-11 |
+| Mobile = **PWA** issue du même code web, pas d'application native | Figé le 2026-09-11 |
+| Authentification = **email + code à 6 chiffres**, téléphone obligatoire | Figé le 2026-09-11 |
+| Hébergement = **tout sur le VPS**, `web` et `api` sur la même origine | Figé le 2026-09-11 |
 | LLM = **DeepSeek** (API compatible OpenAI) | Figé |
 | Monétisation = **abonnement mensuel** (pas de packs) | Figé |
 | **Aucun envoi de candidature par le bot** — il prépare, l'utilisateur dépose | Figé le 2026-09-08 |
@@ -31,7 +37,8 @@ Ces points ont été tranchés par le porteur du projet. Ne les remets pas en qu
 ### Interdictions strictes
 
 1. **Ne jamais soumettre une candidature à la place de l'utilisateur, par aucun canal.** Ni formulaire, ni site à login, ni email. Le bot produit les documents et indique où déposer ; le dépôt est toujours un geste de l'utilisateur. Cette règle était limitée aux sites à login (LinkedIn, Indeed, Talent.com) ; elle a été **généralisée le 2026-09-08** par le porteur du projet. Conséquence : il n'y a plus de « mode brouillon » à distinguer, c'est le seul mode.
-2. **Ne jamais stocker de mot de passe utilisateur en clair**, et ne jamais demander le mot de passe d'une boîte mail. Si l'envoi depuis l'adresse de l'utilisateur devient nécessaire → OAuth Gmail uniquement, jamais de mot de passe applicatif saisi dans le bot.
+2. **Aucun mot de passe utilisateur, nulle part.** L'authentification se fait par email + code à usage unique : il n'y a donc pas de mot de passe à stocker, à hacher, ni à réinitialiser. Ne jamais demander le mot de passe d'une boîte mail. Si l'envoi depuis l'adresse de l'utilisateur devenait nécessaire → OAuth Gmail uniquement.
+   **Corollaire depuis le 2026-09-11** : le code de vérification ne vit qu'en Redis, haché, avec un TTL de 5 minutes. Il n'entre jamais en base, et n'apparaît dans aucun log — sauf dans le fournisseur d'envoi « console » de développement, où c'est sa raison d'être.
 3. **Ne jamais envoyer deux lettres de motivation structurellement identiques.** Voir §8 (anti-détection).
 4. **Ne jamais scraper sans délai ni User-Agent identifiable.** Respect de `robots.txt`, 1 requête / 3-5 s par domaine.
 5. **Pas de sur-ingénierie.** Pas de Kubernetes, pas de microservices, pas de Kafka. Un monolithe Python déployé sur un VPS à 5 €/mois doit tenir 5 000 utilisateurs.
@@ -42,6 +49,9 @@ Ces points ont été tranchés par le porteur du projet. Ne les remets pas en qu
 
 ```
 Langage      Python 3.11+
+API          FastAPI (le cœur : tous les clients passent par là)
+Web          Next.js + React + TypeScript, servi en PWA
+Auth         JWT via pyjwt — email + code à 6 chiffres, aucun mot de passe
 Bot          aiogram 3.x (async)
 DB           PostgreSQL 16
 ORM          SQLAlchemy 2.0 (style async) + Alembic pour les migrations
@@ -76,19 +86,39 @@ Les paquets sont ajoutés phase par phase, pas tous d'un coup, pour garder l'ima
 | `fastapi` + `uvicorn` | 0 | §4, healthcheck ; support du webhook de paiement en §10 |
 | `httpx` | 0 | §3, requis par aiogram et par l'ingestion |
 
-À ajouter plus tard : `selectolax` (Phase 1), `openai` (Phase 2), `python-docx` + `pdfplumber` (Phase 2/4).
+### Dépendances ajoutées en Phase 2
+
+| Paquet | Justification |
+|---|---|
+| `pyjwt` | §4, jetons d'accès. Rouler sa propre signature est une mauvaise idée en cryptographie |
+| `email-validator` | §5, validation et normalisation d'adresse ; une regex maison est une source d'erreurs connue |
+| `phonenumbers` | §5, normalisation E.164 sénégalaise, plus fiable qu'une regex sur les préfixes mobiles |
+| `next`, `react`, `react-dom`, `typescript` | §3, client web |
+
+À ajouter plus tard : `openai` (Phase 3), `python-docx` + `pdfplumber` (Phase 3/5), le paquet du
+fournisseur d'envoi d'email (quand un domaine existera, cf. §14.1).
 
 ---
 
 ## 4. Architecture
 
-Trois processus dans le même repo, lancés séparément par Docker Compose :
+Cinq processus dans le même repo, lancés séparément par Docker Compose :
 
 ```
+api             → FastAPI : API REST JSON + /health + webhook de paiement (§10)
+web             → Next.js : interface web et PWA, consomme api
+bot             → aiogram : client Telegram
 worker_ingest   → scraping + normalisation + dédoublonnage des offres  (toutes les 2h)
-worker_match    → matching offres/profils + push des alertes Telegram   (2x/jour, 8h et 18h GMT)
-bot             → serveur aiogram + webhook de paiement (FastAPI monté à côté)
+worker_match    → matching offres/profils + push des alertes            (2x/jour, 8h et 18h GMT)
 ```
+
+**`web` et `api` sont servis sur la même origine**, derrière le même reverse proxy : aucun CORS à
+configurer, et le jeton vit dans un cookie `httpOnly` plutôt que dans `localStorage`.
+
+**La règle métier n'existe qu'une fois, dans `src/core/`.** Ce package n'importe ni `fastapi` ni
+`aiogram` — un test le vérifie. L'API le traduit en HTTP, le bot en messages Telegram.
+**Le bot n'appelle pas l'API par HTTP** : il importe `src/core/` en direct. Pas de saut réseau
+entre deux de nos propres processus. On reste un monolithe (§2.5).
 
 Arborescence cible :
 
@@ -110,9 +140,28 @@ jobbot/
 │   ├── config.py              # pydantic Settings
 │   ├── logging_setup.py       # structlog JSON, appelé par chaque entrypoint
 │   ├── alerting.py            # alerte admin (scraper cassé, source bloquée)
-│   ├── health.py              # app FastAPI : /health (DB + Redis)
 │   ├── worker_ingest.py       # entrypoint process worker_ingest (APScheduler)
 │   ├── worker_match.py        # entrypoint process worker_match (APScheduler)
+│   ├── core/                  # MÉTIER PUR — n'importe ni fastapi ni aiogram
+│   │   ├── telephone.py       # normalisation E.164 sénégalaise
+│   │   ├── courriel_valide.py # validation + normalisation d'adresse
+│   │   ├── erreurs.py         # exceptions métier, traduites par chaque client
+│   │   └── auth/
+│   │       ├── codes.py       # génération, hachage, vérification du code à 6 chiffres
+│   │       ├── jetons.py      # encodage/décodage JWT + contrôle de token_version
+│   │       ├── limites.py     # garde-fous anti-abus (Redis)
+│   │       └── comptes.py     # création de compte, liaison phone <-> telegram_id
+│   ├── courriel/              # nommé `courriel` et NON `email` : `email` est stdlib
+│   │   ├── provider.py        # interface FournisseurCourriel
+│   │   └── console.py         # impl. de dev : le code part dans les logs
+│   ├── api/
+│   │   ├── app.py             # construction de l'app FastAPI
+│   │   ├── deps.py            # session DB, utilisateur courant
+│   │   ├── schemas/           # entrées/sorties pydantic
+│   │   └── routers/
+│   │       ├── auth.py        # /auth/code/demande, /auth/code/verifie, /auth/deconnexion
+│   │       ├── moi.py         # /moi, /moi/telegram/jeton
+│   │       └── sante.py       # /health (DB + Redis) — déplacé depuis src/health.py
 │   ├── db/
 │   │   ├── models.py
 │   │   └── session.py
@@ -149,12 +198,17 @@ jobbot/
 │   ├── bot/
 │   │   ├── main.py
 │   │   ├── handlers/
-│   │   │   └── start.py       # /start et /aide
+│   │   │   ├── start.py       # /start et /aide
+│   │   │   └── compte.py      # liaison de compte par « partager mon contact »
 │   │   ├── keyboards.py
 │   │   └── texts.py           # TOUS les textes utilisateur ici, jamais inline
 │   └── matching/
 │       └── scorer.py
-└── tests/
+├── tests/
+└── web/                       # client Next.js (TypeScript), même dépôt
+    ├── app/
+    ├── Dockerfile             # build multi-étapes, `next start` en production
+    └── package.json
 ```
 
 Les modules non encore écrits existent sous forme de package vide (`__init__.py` seul) : ils sont créés
@@ -166,7 +220,15 @@ au fil des phases, pas d'avance.
 
 Tables minimales (à créer via Alembic, pas de `create_all` en prod) :
 
-**`users`** — `telegram_id` (unique, bigint), `phone`, `full_name`, `created_at`, `language`, `state` (onboarding/active/blocked)
+**`users`** — `email` (unique, **NOT NULL** — identité de connexion), `phone` (unique, **NOT NULL**, E.164), `telegram_id` (unique, bigint, **nullable** depuis le 2026-09-11), `token_version` (int, révocation des jetons), `full_name`, `created_at`, `language`, `state` (onboarding/active/blocked)
+
+> **Pas de table de sessions.** Un seul JWT d'accès de 30 jours, portant `token_version`. On charge
+> déjà l'utilisateur à chaque requête authentifiée : on compare la valeur du jeton à celle de la
+> ligne. Se déconnecter de partout = incrémenter la colonne. Une colonne plutôt qu'une table et un
+> second cycle de jetons (§2.5). Prix assumé : un jeton volé reste valable jusqu'à révocation.
+
+> **Le code de vérification ne touche jamais Postgres.** Il vit en Redis, haché en HMAC-SHA256,
+> TTL 5 minutes, avec son compteur d'essais.
 
 **`profiles`** — `user_id` FK, `raw_cv_text`, `structured` (JSONB : expériences, formations, compétences, langues, secteurs visés, mobilité, prétention salariale), `cv_file_path`, `updated_at`
 
@@ -221,10 +283,16 @@ Le quota de 25 est un **plafond de coût**, pas une limite arbitraire. Il doit �
 
 ### Onboarding (doit tenir en moins de 2 minutes)
 
-1. `/start` → présentation en 3 lignes maximum
+1. Adresse email → code à 6 chiffres → nom et téléphone (uniquement si le compte est nouveau)
 2. Upload du CV (PDF ou DOCX) → parsing → **affichage du profil extrait pour validation** (l'utilisateur corrige en un tap)
-3. Choix des secteurs + région + type de contrat (boutons inline, pas de saisie libre)
+3. Choix des secteurs + région + type de contrat (boutons, pas de saisie libre)
 4. Première alerte envoyée immédiatement — **la valeur doit être visible avant toute demande de paiement**
+
+Le parcours est le même sur le web et sur Telegram. Côté Telegram, l'étape 1 se réduit au bouton
+natif « partager mon contact » quand le compte existe déjà : le numéro renvoyé est **déjà vérifié
+par Telegram**, il n'y a donc aucun email à envoyer.
+**Garde-fou obligatoire** : vérifier que `contact.user_id == message.from_user.id`, sinon un tiers
+peut transférer le contact de quelqu'un d'autre et se greffer sur son compte.
 
 ---
 
@@ -270,7 +338,23 @@ Le bot n'envoie rien à un recruteur. Il remet à l'utilisateur, dans Telegram, 
 - Un objet de message prêt à copier : intitulé exact du poste + référence de l'annonce si elle existe.
 - Un rappel court : que le recruteur répondra à **son** adresse à lui, puisque c'est lui qui envoie.
 
-Ce que cette décision supprime, et qu'il ne faut pas réintroduire : domaine d'envoi, SPF/DKIM/DMARC, fournisseur SMTP transactionnel, montée en charge, gestion des bounces. Aucun de ces sujets n'existe plus.
+**Révision du 2026-09-11 — deux choses à ne plus confondre.**
+
+- **Le bot n'envoie aucune candidature, par aucun canal. Toujours figé.** Il n'écrit jamais à un
+  recruteur, ni en son nom propre ni au nom de l'utilisateur. L'interdiction n°1 du §2 est entière.
+- **L'email transactionnel vers nos propres utilisateurs est autorisé**, et uniquement pour vérifier
+  l'adresse de quelqu'un qui s'inscrit chez nous.
+
+Ce second point réintroduit donc, à petite échelle : un domaine d'envoi, SPF/DKIM/DMARC, un
+fournisseur transactionnel. C'est le prix de l'authentification par email, tranchée le 2026-09-11.
+La gestion des bounces reste volontairement hors périmètre : une adresse mal saisie se manifeste
+par un code qui n'arrive pas, et l'utilisateur ressaisit.
+
+**Un sous-domaine gratuit ne convient pas.** SPF, DKIM et DMARC se posent dans la zone DNS du
+domaine ; sur `*.vercel.app` elle appartient à Vercel. Les fournisseurs de sous-domaines gratuits
+partagent un domaine parent entre des milliers d'utilisateurs, largement présent sur les listes de
+blocage : le code arrive en indésirables et l'inscription échoue **sans erreur côté serveur** —
+le pire mode de défaillance possible. Cf. §14.1.
 
 ---
 
@@ -303,7 +387,7 @@ Le marché sénégalais est petit : les mêmes recruteurs à Dakar reçoivent to
 
 - Interface abstraite `billing/provider.py` avec `create_payment(user, amount) -> checkout_url` et `verify(payload) -> PaymentResult`. **Une seule implémentation concrète au départ**, mais l'abstraction est obligatoire : les agrégateurs locaux changent de conditions.
 - Comparer PayDunya, InTouch et Naboo sur : frais fixes par transaction, fiabilité du webhook, délai de settlement. **Attention au frais plancher** : sur un ticket de 1 000 FCFA, un minimum à 100 FCFA représente 10 % du revenu — remonter ce chiffre au porteur du projet dès qu'il est connu.
-- Webhook FastAPI monté sur le même process que le bot. **Vérification de signature obligatoire.** Idempotence : un même `provider_ref` traité deux fois ne crée qu'un seul abonnement.
+- Webhook FastAPI servi par le process `api` (et non plus par le process `bot`, qui ne sert plus de HTTP depuis le 2026-09-11). **Vérification de signature obligatoire.** Idempotence : un même `provider_ref` traité deux fois ne crée qu'un seul abonnement.
 - Toujours prévoir un **repli manuel** : commande `/paiement_manuel` qui affiche un numéro Wave et permet d'envoyer une capture d'écran à l'admin, avec activation via commande admin. Les agrégateurs tombent ; l'encaissement ne doit jamais s'arrêter.
 
 ---
@@ -311,10 +395,11 @@ Le marché sénégalais est petit : les mêmes recruteurs à Dakar reçoivent to
 ## 11. Contexte terrain à respecter dans l'UX
 
 - **Data chère et lente.** Messages courts. Pas d'images décoratives. Documents en PDF léger (< 300 Ko).
-- **Beaucoup d'utilisateurs quitteront le bot pendant l'onboarding** s'il y a plus de 4 étapes. Compter et logger les abandons à chaque étape.
+- **Beaucoup d'utilisateurs abandonneront pendant l'onboarding** s'il y a plus de 4 étapes. Compter et logger les abandons à chaque étape, sur le web comme sur Telegram.
+- **Le web ne dispense pas de la sobriété.** Next.js est plus lourd qu'un rendu serveur classique : pas de librairie de composants lourde, polices locales via `next/font`, découpage de bundle agressif. Le poids transféré est un **critère de validation de phase**, pas un vœu.
 - Français simple, sans jargon RH. Éviter « optimiser votre employabilité » ; dire « améliorer votre CV ».
 - Prévoir le tutoiement/vouvoiement cohérent (choisir le **vouvoiement**) et ne jamais mélanger.
-- Toujours proposer une sortie : chaque écran a un bouton retour, `/aide` est toujours disponible.
+- Toujours proposer une sortie : chaque écran a un bouton retour, `/aide` est toujours disponible côté Telegram et son équivalent côté web.
 
 ---
 
@@ -330,23 +415,38 @@ Repo, Docker Compose, config, modèles + migrations, bot qui répond `/start`, h
 `BaseScraper`, source `emploidakar.com` (priorité n°1), ReliefWeb, puis 2 autres sites sénégalais. Normalisation, dédoublonnage, extraction d'email. Commande admin `/stats_ingest`.
 *Validation : 100+ offres uniques en base, dont au moins 30 avec un email de candidature valide.*
 
-**Phase 2 — Profil (1 sem.)**
-Upload CV, parsing DeepSeek, validation par l'utilisateur, préférences.
+> **Plan révisé le 2026-09-11** (bascule vers un backend multi-clients). Les Phases 0 et 1 sont
+> conservées telles quelles : rien dans l'ingestion ne connaissait Telegram, tout est réutilisable.
+
+**Phase 2 — Socle backend et comptes (1 sem.)**
+Extraction de `src/core/`, API FastAPI, authentification email + code à 6 chiffres, migration
+d'identité, abstraction d'envoi d'email, écrans web d'inscription, liaison du compte Telegram.
+Design détaillé : `docs/superpowers/specs/2026-09-11-socle-backend-design.md`.
+*Validation : inscription web complète ; depuis le bot, « partager mon contact » avec le même numéro retombe sur le compte existant sans doublon ; un contact usurpé est refusé ; page d'inscription sous 200 Ko transférés.*
+
+**Phase 3 — Profil (1 sem.)**
+Upload CV, parsing DeepSeek, validation par l'utilisateur, préférences. Exposé par l'API, consommé
+par le web.
 *Validation : 10 CV réels de formats différents parsés correctement.*
 
-**Phase 3 — Alertes (3 j.)**
-Matching, push 2x/jour, filtres, désabonnement.
+**Phase 4 — Offres et alertes (3 j.)**
+Matching, liste des offres dans le web, alertes 2x/jour, filtres, désabonnement.
 *Validation : un utilisateur test reçoit des offres pertinentes 2 jours de suite.*
 
-**Phase 4 — Génération des documents (1 sem.)**
-CV adapté, lettre, rendu PDF, remise du dossier dans Telegram avec le mode de dépôt, quotas.
+**Phase 5 — Génération des documents (1 sem.)**
+CV adapté, lettre, rendu PDF, remise du dossier avec le mode de dépôt, quotas.
 *Validation : 5 dossiers générés pour 5 offres réelles, PDF < 300 Ko, ouverts sans erreur sur un Android d'entrée de gamme, et chacun indiquant correctement où déposer.*
 
-**Phase 5 — Paiement (1 sem.)**
+**Phase 6 — Paiement (1 sem.)**
 Intégration agrégateur, webhook, cycle de vie de l'abonnement, relances, repli manuel.
+**Un nom de domaine est indispensable au plus tard ici** (§14.1) : sans lui, aucun email réel ne part.
 *Validation : un paiement réel de 1 000 FCFA depuis un vrai compte Wave débloque le plan Pro en moins de 60 s.*
 
-**Phase 6 — Exploitation (continu)**
+**Phase 7 — Bot Telegram remis au niveau du web (3 j.)**
+Le parcours complet devient faisable sans quitter Telegram.
+*Validation : un utilisateur mène profil, alertes et dossier de bout en bout dans le bot seul.*
+
+**Phase 8 — Exploitation (continu)**
 Dashboard admin minimal (commandes Telegram suffisent), alertes sur scraper cassé, suivi coût LLM, backup Postgres quotidien.
 
 ---
@@ -368,11 +468,15 @@ Dashboard admin minimal (commandes Telegram suffisent), alertes sur scraper cass
 
 À poser dès la Phase 0, les réponses conditionnent le code :
 
-1. Nom de domaine et nom du produit. — **`jobbot` retenu à titre PROVISOIRE le 2026-08-26.** **Ne bloque plus la Phase 4** depuis la décision du 2026-09-08 : sans envoi d'email, il n'y a ni SPF ni DKIM à configurer.
+1. Nom de domaine et nom du produit. — **`jobbot` retenu à titre PROVISOIRE le 2026-08-26.** **Redevenu nécessaire le 2026-09-11** avec l'authentification par email : SPF, DKIM et DMARC exigent un domaine possédé, et un sous-domaine gratuit ne convient pas (§7). **Ne bloque pas la Phase 2** — elle se développe et se teste intégralement avec le fournisseur d'envoi « console », et un bac à sable de fournisseur permet même de recevoir de vrais emails sur l'adresse vérifiée du propriétaire du compte. **Bloque l'ouverture à de vrais utilisateurs, donc la Phase 6.** Ordre de grandeur : 7 000 à 8 500 FCFA par an pour un `.com`. — ouvert
 2. Agrégateur mobile money retenu et grille de frais réelle. — ouvert
 3. Statut juridique de la structure (nécessaire pour ouvrir un compte marchand). — ouvert
 4. Politique de confidentialité : les CV sont des données personnelles. Durée de conservation, suppression sur demande, commande `/supprimer_mes_donnees` à prévoir. — ouvert
-5. Adresse email de l'utilisateur. — **Sans objet depuis le 2026-09-08** : le bot n'envoie plus rien, il n'y a plus de Reply-To. `users.email` reste nullable et utile pour pré-remplir le CV, rien de plus.
+5. Adresse email de l'utilisateur. — **Rouvert et tranché le 2026-09-11** : l'adresse devient l'**identité de connexion**, `users.email` passe `NOT NULL UNIQUE`. Elle ne sert toujours pas de Reply-To, puisque le bot n'envoie rien à personne (§2, interdiction n°1).
+
+6. Fournisseur d'envoi d'email transactionnel. — à choisir en même temps que le domaine. — ouvert
+
+7. Politique de confidentialité et `/supprimer_mes_donnees` (voir point 4). — La Phase 2 commence à stocker adresse et téléphone ; la Phase 3 y ajoutera les CV. À trancher **au plus tard en Phase 3**.
 
 ---
 
