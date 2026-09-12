@@ -2,8 +2,10 @@
 
 Depuis le 2026-09-12 (tâche 18), cet endpoint ne prend plus de téléphone :
 le code à 6 chiffres ne prouve que la possession de l'adresse email, jamais
-celle d'un numéro saisi au clavier. `telephone` a disparu de `VerificationCode`
-et `Utilisateur.telephone` peut désormais valoir `None`.
+celle d'un numéro saisi au clavier. `telephone` a disparu de
+`VerificationCode`. Depuis la migration 0005 (retrait de Telegram, même
+date), `Utilisateur` n'expose plus du tout de champ `telephone` : la réponse
+se limite à `id`, `email`, `nom_complet`, `etat`.
 
 Lancer avec : RUN_INTEGRATION_TESTS=1 pytest -m integration
 
@@ -55,8 +57,7 @@ def test_inscription_complete(
     assert r.status_code == 200
     corps = r.json()
     assert corps["email"] == ADRESSE
-    assert corps["telephone"] is None  # plus jamais collecté à l'inscription
-    assert corps["telegram_lie"] is False
+    assert set(corps) == {"id", "email", "nom_complet", "etat"}
     assert get_settings().cookie_session_nom in r.cookies
 
 
@@ -80,7 +81,6 @@ def test_telephone_dans_le_corps_est_ignore(
         },
     )
     assert r.status_code == 200
-    assert r.json()["telephone"] is None
 
 
 @pytest.mark.integration
@@ -157,7 +157,6 @@ def test_deux_inscriptions_independantes_sans_telephone(
         json={"email": autre_adresse, "code": autre_code, "nom_complet": "Premier Compte"},
     )
     assert r1.status_code == 200
-    assert r1.json()["telephone"] is None
 
     code = _code(client_auth, fournisseur_courriel_espion)
     r2 = client_auth.post(
@@ -165,7 +164,6 @@ def test_deux_inscriptions_independantes_sans_telephone(
         json={"email": ADRESSE, "code": code, "nom_complet": "Fatou Diop"},
     )
     assert r2.status_code == 200
-    assert r2.json()["telephone"] is None
     assert r2.json()["id"] != r1.json()["id"]
 
 
@@ -181,7 +179,6 @@ def test_reconnexion_sans_ressaisir_le_nom(
     code2 = _code(client_auth, fournisseur_courriel_espion)
     r = client_auth.post("/auth/code/verifie", json={"email": ADRESSE, "code": code2})
     assert r.status_code == 200
-    assert r.json()["telephone"] is None
 
 
 @pytest.mark.integration

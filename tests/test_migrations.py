@@ -69,19 +69,19 @@ async def test_check_contraint_statut_applique(postgres_url: str) -> None:
         async with engine.begin() as conn:
             await conn.execute(
                 text(
-                    "INSERT INTO users (email, phone, telegram_id, token_version, language, state) "
-                    "VALUES (:email, :phone, :tg, 0, 'fr', 'onboarding')"
+                    "INSERT INTO users (email, token_version, language, state) "
+                    "VALUES (:email, 0, 'fr', 'onboarding')"
                 ),
-                {"email": "check@test.invalid", "phone": "+221779990001", "tg": 999_001},
+                {"email": "check@test.invalid"},
             )
             with pytest.raises(Exception, match="ck_users_state|check constraint"):
                 await conn.execute(
                     text(
                         "INSERT INTO users "
-                        "(email, phone, telegram_id, token_version, language, state) "
-                        "VALUES (:email, :phone, :tg, 0, 'fr', 'etat_invalide')"
+                        "(email, token_version, language, state) "
+                        "VALUES (:email, 0, 'fr', 'etat_invalide')"
                     ),
-                    {"email": "check2@test.invalid", "phone": "+221779990002", "tg": 999_002},
+                    {"email": "check2@test.invalid"},
                 )
     finally:
         await engine.dispose()
