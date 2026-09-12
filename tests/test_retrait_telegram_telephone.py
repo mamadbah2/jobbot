@@ -1,0 +1,50 @@
+"""Garde anti-retour du retrait du 2026-09-12.
+
+Telegram et le numéro de téléphone ont été retirés du produit (spec
+`docs/superpowers/specs/2026-09-12-retrait-telegram-design.md`). Sans ces
+tests, ils peuvent revenir par un import isolé, un réglage rajouté ou une
+fonction ressuscitée, sans que rien ne le signale : c'est précisément ce
+genre de retour silencieux qu'aucun test fonctionnel ne voit.
+"""
+
+from __future__ import annotations
+
+import ast
+import tomllib
+from pathlib import Path
+
+RACINE_SRC = Path("src")
+
+
+def _fichiers_src() -> list[Path]:
+    fichiers = sorted(RACINE_SRC.rglob("*.py"))
+    assert len(fichiers) >= 30, "arborescence src/ introuvable : le test serait creux"
+    return fichiers
+
+
+def _modules_importes(fichier: Path) -> set[str]:
+    arbre = ast.parse(fichier.read_text(encoding="utf-8"))
+    modules: set[str] = set()
+    for noeud in ast.walk(arbre):
+        if isinstance(noeud, ast.Import):
+            modules.update(alias.name.split(".")[0] for alias in noeud.names)
+        elif isinstance(noeud, ast.ImportFrom) and noeud.module and noeud.level == 0:
+            modules.add(noeud.module.split(".")[0])
+    return modules
+
+
+def test_aucun_module_de_src_n_importe_aiogram() -> None:
+    fautifs = [str(f) for f in _fichiers_src() if "aiogram" in _modules_importes(f)]
+    assert not fautifs, f"aiogram est de retour dans : {fautifs}"
+
+
+def test_aiogram_n_est_plus_une_dependance_declaree() -> None:
+    """Retirer les imports sans retirer la dépendance laisserait l'image Docker
+    la télécharger et un futur import passer inaperçu."""
+    projet = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))
+    declarees = " ".join(projet["project"]["dependencies"]).lower()
+    assert "aiogram" not in declarees
+
+
+def test_le_paquet_du_bot_n_existe_plus() -> None:
+    assert not Path("src/bot").exists(), "src/bot/ est de retour"

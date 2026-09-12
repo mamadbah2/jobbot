@@ -1,4 +1,4 @@
-"""Le fichier compose décrit bien les cinq processus du §4."""
+"""Le fichier compose décrit bien les processus du §4."""
 
 from __future__ import annotations
 
@@ -25,14 +25,13 @@ def test_l_api_porte_le_healthcheck() -> None:
     assert "health" in str(SERVICES["api"]["healthcheck"]["test"])
 
 
-def test_le_bot_n_expose_plus_de_port() -> None:
-    """Le bot ne sert plus de HTTP depuis le 2026-09-11 (CLAUDE.md §4)."""
-    assert "ports" not in SERVICES["bot"]
-    assert "healthcheck" not in SERVICES["bot"]
+def test_le_bot_n_existe_plus() -> None:
+    """Le bot a été supprimé le 2026-09-12 : il n'est plus un client du produit."""
+    assert "bot" not in SERVICES
 
 
-def test_les_cinq_processus_sont_declares() -> None:
-    attendus = {"api", "web", "bot", "worker_ingest", "worker_match"}
+def test_les_quatre_processus_sont_declares() -> None:
+    attendus = {"api", "web", "worker_ingest", "worker_match"}
     assert attendus <= set(SERVICES)
 
 
@@ -42,11 +41,11 @@ def test_postgres_reste_sur_la_boucle_locale() -> None:
 
 
 def test_les_services_applicatifs_partagent_la_meme_politique_de_dependance() -> None:
-    """api, bot, worker_ingest et worker_match doivent dépendre des mêmes services,
+    """api, worker_ingest et worker_match doivent dépendre des mêmes services,
     dans les mêmes conditions — factorisé via l'ancre `x-depends-app` pour éviter
     qu'une future modification n'en oublie un.
     """
-    services = ("api", "bot", "worker_ingest", "worker_match")
+    services = ("api", "worker_ingest", "worker_match")
     politiques = [SERVICES[nom]["depends_on"] for nom in services]
     assert all(p == politiques[0] for p in politiques)
     assert politiques[0] == {

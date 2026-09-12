@@ -71,13 +71,6 @@ services:
       retries: 5
       start_period: 20s
 
-  bot:
-    <<: *app
-    command: ["python", "-m", "src.bot.main"]
-    # Plus de `ports` ni de `healthcheck` : depuis le 2026-09-11 le bot ne sert
-    # plus de HTTP, c'est le service `api` qui porte /health (CLAUDE.md §4).
-    depends_on: *depends_app
-
   # Client Next.js. L'image est construite par le plan « client web » ;
   # `web/Dockerfile` n'existe pas encore, donc ce service ne démarre pas tant
   # que ce plan n'est pas exécuté. Déclaré ici pour que l'architecture du §4

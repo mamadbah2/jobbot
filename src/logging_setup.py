@@ -54,11 +54,6 @@ def setup_logging(level: str = "INFO", *, json_output: bool = True) -> None:
     #   diagnostic-là dans les quatre process. Non traité ici : ni la racine,
     #   ni `asyncio` seul, ne referment cette fuite sans ce coût ; voir le
     #   rapport de la correction pour le détail et la piste de remédiation.
-    # - `aiogram.event` journalise lui aussi les exceptions de traitement
-    #   d'un update avec `exc_info` (`_process_update`), mais **le message
-    #   embarque déjà `str(exc)` en clair** (`"...%s: %s", type, e`) — un
-    #   filtre sur `exc_info` ne fermerait pas cette fuite-là, seulement sa
-    #   trace. Un no-op trompeur : pas ajouté ici, signalé dans le rapport.
     logging.getLogger("uvicorn.error").addFilter(SansTrace())
 
     renderer: structlog.typing.Processor = (
