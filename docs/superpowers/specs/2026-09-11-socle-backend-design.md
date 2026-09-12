@@ -209,9 +209,19 @@ l'adresse vérifiée du propriétaire du compte. Le domaine ne devient indispens
 1. **`/auth/code/demande` répond exactement pareil que l'adresse existe ou non.** Même code HTTP,
    même corps, même temps de réponse à la granularité observable. Sinon l'endpoint devient un
    annuaire qui dit publiquement qui est client.
-2. **Le téléphone et le nom sont fournis à la vérification, pas à la demande.** On ne crée une
-   ligne `users` qu'après un code valide. Sinon n'importe qui remplit la table avec des adresses
-   qu'il ne possède pas, et `phone UNIQUE` devient un moyen de bloquer le numéro d'autrui.
+2. **Le nom est fourni à la vérification, pas à la demande.** On ne crée une ligne `users` qu'après
+   un code valide. Sinon n'importe qui remplit la table avec des adresses qu'il ne possède pas.
+
+> **Correction du 2026-09-12.** Cette section disait à l'origine que le téléphone était, comme le
+> nom, fourni à la vérification, et que cela suffisait à protéger `phone UNIQUE` contre un numéro
+> d'autrui. C'était faux : un code valide à ce stade ne prouve que la possession de **l'adresse
+> email**, jamais celle d'un numéro simplement saisi dans le même formulaire. Un attaquant pouvait
+> donc s'inscrire avec sa propre adresse et le numéro d'une victime — qui se retrouvait ensuite
+> bloquée (`TelephoneDejaUtilise`) et dont le contact Telegram partagé se serait rattaché au compte
+> de l'attaquant, `lier_telegram` retrouvant alors un compte par ce numéro. Le porteur du projet a
+> tranché le 2026-09-12 : le téléphone n'est plus collecté à l'inscription du tout. Il n'est posé
+> que par un canal qui le vérifie lui-même — la liaison Telegram (`comptes.definir_telephone`), et
+> plus tard le webhook mobile money (§10 de `CLAUDE.md`). Voir migration `0004` et `CLAUDE.md` §5.
 
 ### Un seul endpoint pour l'inscription et la reconnexion
 

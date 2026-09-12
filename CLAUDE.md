@@ -26,7 +26,7 @@ Ces points ont été tranchés par le porteur du projet. Ne les remets pas en qu
 | Architecture = **couche métier + API**, plusieurs clients | Figé le 2026-09-11 |
 | Premier client = **web (Next.js, PWA)** ; Telegram remis à niveau ensuite | Figé le 2026-09-11 |
 | Mobile = **PWA** issue du même code web, pas d'application native | Figé le 2026-09-11 |
-| Authentification = **email + code à 6 chiffres**, téléphone obligatoire | Figé le 2026-09-11 |
+| Authentification = **email + code à 6 chiffres** ; téléphone **facultatif**, posé seulement par un canal qui le vérifie lui-même (liaison Telegram, puis mobile money en Phase 6) | Révisé le 2026-09-12 (téléphone obligatoire depuis le 2026-09-11) |
 | Hébergement = **tout sur le VPS**, `web` et `api` sur la même origine | Figé le 2026-09-11 |
 | LLM = **DeepSeek** (API compatible OpenAI) | Figé |
 | Monétisation = **abonnement mensuel** (pas de packs) | Figé |
@@ -154,7 +154,7 @@ jobbot/
 │   │       ├── codes.py       # génération, hachage, vérification du code à 6 chiffres
 │   │       ├── jetons.py      # encodage/décodage JWT + contrôle de token_version
 │   │       ├── limites.py     # garde-fous anti-abus (Redis)
-│   │       └── comptes.py     # création de compte, liaison phone <-> telegram_id
+│   │       └── comptes.py     # création de compte, pose du téléphone vérifié, liaison telegram_id
 │   ├── courriel/              # nommé `courriel` et NON `email` : `email` est stdlib
 │   │   ├── provider.py        # interface FournisseurCourriel
 │   │   └── console.py         # impl. de dev : le code part dans les logs
@@ -225,7 +225,15 @@ au fil des phases, pas d'avance.
 
 Tables minimales (à créer via Alembic, pas de `create_all` en prod) :
 
-**`users`** — `email` (unique, **NOT NULL** — identité de connexion), `phone` (unique, **NOT NULL**, E.164), `telegram_id` (unique, bigint, **nullable** depuis le 2026-09-11), `token_version` (int, révocation des jetons), `full_name`, `created_at`, `language`, `state` (onboarding/active/blocked)
+**`users`** — `email` (unique, **NOT NULL** — identité de connexion), `phone` (unique, **nullable** depuis le 2026-09-12, E.164), `telegram_id` (unique, bigint, **nullable** depuis le 2026-09-11), `token_version` (int, révocation des jetons), `full_name`, `created_at`, `language`, `state` (onboarding/active/blocked)
+
+> **Pourquoi `phone` est devenu facultatif.** Le code à 6 chiffres ne prouve que la possession de
+> l'adresse email, jamais celle d'un numéro saisi au clavier : `phone UNIQUE + NOT NULL` permettait
+> donc à un attaquant de s'inscrire avec sa propre adresse et le numéro d'une victime, lui bloquant
+> son inscription et détournant vers son propre compte le rattachement Telegram qu'elle ferait
+> ensuite. Le numéro n'est désormais posé que par un canal qui le certifie lui-même — la liaison
+> Telegram aujourd'hui, le webhook mobile money en Phase 6 — jamais par une saisie libre à
+> l'inscription. Voir migration `0004`.
 
 > **Pas de table de sessions.** Un seul JWT d'accès de 30 jours, portant `token_version`. On charge
 > déjà l'utilisateur à chaque requête authentifiée : on compare la valeur du jeton à celle de la
@@ -289,16 +297,19 @@ Le quota de 25 est un **plafond de coût**, pas une limite arbitraire. Il doit �
 
 ### Onboarding (doit tenir en moins de 2 minutes)
 
-1. Adresse email → code à 6 chiffres → nom et téléphone (uniquement si le compte est nouveau)
+1. Adresse email → code à 6 chiffres → nom (uniquement si le compte est nouveau ; le téléphone n'est plus demandé ici depuis le 2026-09-12, voir §5)
 2. Upload du CV (PDF ou DOCX) → parsing → **affichage du profil extrait pour validation** (l'utilisateur corrige en un tap)
 3. Choix des secteurs + région + type de contrat (boutons, pas de saisie libre)
 4. Première alerte envoyée immédiatement — **la valeur doit être visible avant toute demande de paiement**
 
-Le parcours est le même sur le web et sur Telegram. Côté Telegram, l'étape 1 se réduit au bouton
-natif « partager mon contact » quand le compte existe déjà : le numéro renvoyé est **déjà vérifié
-par Telegram**, il n'y a donc aucun email à envoyer.
+Le parcours est le même sur le web et sur Telegram. Depuis le 2026-09-12, « partager mon contact »
+ne sert plus à **retrouver** un compte (ce numéro n'identifie plus rien avant d'avoir été lié) : il
+sert à **poser un numéro vérifié** sur un compte déjà identifié — par la session web, ou par le
+lien profond `t.me/<bot>?start=<jeton>` côté Telegram. Le numéro renvoyé par le bouton natif est
+**déjà vérifié par Telegram**, ce qui en fait la seule saisie de téléphone qu'on accepte sans
+passer par un email de confirmation.
 **Garde-fou obligatoire** : vérifier que `contact.user_id == message.from_user.id`, sinon un tiers
-peut transférer le contact de quelqu'un d'autre et se greffer sur son compte.
+peut transférer le contact de quelqu'un d'autre et le faire poser sur son propre compte.
 
 ---
 
