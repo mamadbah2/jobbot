@@ -56,7 +56,6 @@ class Settings(BaseSettings):
     jwt_secret: SecretStr = SecretStr("")
     jwt_duree_jours: int = Field(default=30, ge=1)
     cookie_session_nom: str = "jobbot_session"
-    telegram_bot_username: str = ""
 
     # Le code vit en Redis, haché, et expire tout seul (§2, interdiction n°2).
     code_ttl_secondes: int = Field(default=300, ge=60)

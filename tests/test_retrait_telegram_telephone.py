@@ -48,3 +48,20 @@ def test_aiogram_n_est_plus_une_dependance_declaree() -> None:
 
 def test_le_paquet_du_bot_n_existe_plus() -> None:
     assert not Path("src/bot").exists(), "src/bot/ est de retour"
+
+
+def test_l_usage_de_cle_liaison_n_existe_plus() -> None:
+    """`cles.Usage` est un `Literal` : mypy seul le contrôle, et mypy ne tourne
+    pas en CI de test. Sans cette assertion, `deriver(secret, "liaison")`
+    resterait écrivable à l'exécution."""
+    from typing import get_args
+
+    from src.core.auth import cles
+
+    assert "liaison" not in get_args(cles.Usage)
+
+
+def test_aucun_reglage_de_liaison_telegram() -> None:
+    from src.config import Settings
+
+    assert "telegram_bot_username" not in Settings.model_fields
