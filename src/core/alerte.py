@@ -3,7 +3,7 @@
 Vit dans `core` pour la même raison que `CacheRedis` (`src/core/cache.py`) :
 `core` ne doit dépendre d'aucune implémentation applicative. `src/core/auth/
 limites.py` a besoin de signaler un plafond global atteint sans savoir COMMENT
-l'alerte part (log, Telegram...) — seule l'implémentation concrète
+l'alerte part (log, email...) — seule l'implémentation concrète
 (`AlerteJournalisee`, dans `src/alerting.py`) en a besoin.
 """
 

@@ -39,7 +39,6 @@ class Settings(BaseSettings):
     telegram_long_poll_timeout: int = Field(default=2, ge=1, le=50)
     telegram_webhook_url: str = ""
     telegram_webhook_secret: SecretStr = SecretStr("")
-    admin_telegram_id: int = 0
 
     # --- PostgreSQL ---
     postgres_host: str = "postgres"
@@ -76,6 +75,12 @@ class Settings(BaseSettings):
     auth_verifications_par_ip_heure: int = Field(default=60, ge=1)
 
     fournisseur_courriel: str = "console"
+
+    # Destinataire des alertes d'exploitation (scraper cassé, plafond global
+    # atteint, coût LLM). Vide = alertes journalisées seulement : un état
+    # dégradé mais fonctionnel, contrairement à FOURNISSEUR_COURRIEL=console
+    # qui est un trou de sécurité et fait échouer le démarrage en prod.
+    admin_courriel: str = ""
 
     # Adresses du reverse proxy autorisées à renseigner X-Forwarded-For.
     # Vide par défaut = on ne fait confiance à personne et `request.client.host`

@@ -1,13 +1,19 @@
-"""Alertes administrateur (CLAUDE.md §7, §12 Phase 6).
+"""Alertes administrateur (CLAUDE.md §7, §12 Phase 8).
 
 « Ne jamais échouer en silence » : un scraper cassé, une source bloquée ou un
 changement de structure doivent sortir du fichier de logs et arriver à
-quelqu'un. Le canal prévu est Telegram, mais `ADMIN_TELEGRAM_ID` n'est pas
-encore fourni (§14) : l'implémentation par défaut journalise en ERROR et dit
-explicitement qu'aucun destinataire n'est configuré.
+quelqu'un.
 
-L'envoi Telegram viendra derrière la même interface, sans toucher aux
-appelants : le worker d'ingestion ne connaît que `AlerteAdmin`.
+Le canal était Telegram jusqu'au 2026-09-12. Il passe à l'email, derrière le
+même protocole `AlerteAdmin` : ni `src/core/auth/limites.py` ni le worker
+d'ingestion ne changent d'une ligne. Le bac à sable d'un fournisseur
+transactionnel sait envoyer vers l'adresse vérifiée du propriétaire du compte
+sans domaine possédé, donc ce canal est exploitable avant que le §14.1 soit
+tranché — contrairement aux emails vers de vrais utilisateurs.
+
+Sans `ADMIN_COURRIEL`, on retombe sur le log : c'est un état dégradé mais
+fonctionnel, et l'événement le dit explicitement pour qu'on ne croie pas
+l'alerte transmise.
 """
 
 from __future__ import annotations
@@ -16,36 +22,71 @@ from typing import Any
 
 from src.config import Settings
 from src.core.alerte import AlerteAdmin
+from src.courriel.provider import FournisseurCourriel, construire_fournisseur
 from src.logging_setup import get_logger
 
 log = get_logger(__name__)
 
-__all__ = ["AlerteAdmin", "AlerteJournalisee", "construire_alerte"]
+__all__ = ["AlerteAdmin", "AlerteCourriel", "AlerteJournalisee", "construire_alerte"]
+
+
+def _corps(contexte: dict[str, Any]) -> str:
+    """Contexte en texte lisible, une clé par ligne, ordre stable."""
+    if not contexte:
+        return "(aucun contexte)"
+    return "\n".join(f"{cle} : {valeur}" for cle, valeur in sorted(contexte.items()))
 
 
 class AlerteJournalisee:
     """Alerte écrite dans les logs en niveau ERROR.
 
-    Sert de repli permanent : même quand l'envoi Telegram existera, une
-    alerte doit rester traçable dans les logs du VPS.
+    Repli permanent quand aucun destinataire n'est configuré.
     """
 
-    def __init__(self, admin_telegram_id: int) -> None:
-        self.admin_telegram_id = admin_telegram_id
-
     async def envoyer(self, evenement: str, **contexte: Any) -> None:
-        destinataire = str(self.admin_telegram_id) if self.admin_telegram_id else "absent"
         log.error(
             "alerte_admin",
             alerte=evenement,
-            destinataire=destinataire,
-            # Sans identifiant, personne n'est prévenu : le dire dans l'événement
-            # évite de croire l'alerte transmise (§14, point encore ouvert).
-            canal="log" if self.admin_telegram_id else "log_uniquement_admin_non_configure",
+            destinataire="absent",
+            canal="log_uniquement_admin_non_configure",
             **contexte,
         )
 
 
+class AlerteCourriel:
+    """Alerte envoyée par email, et journalisée dans tous les cas.
+
+    Le log part AVANT la tentative d'envoi : une alerte doit rester traçable
+    dans les logs du VPS même si l'envoi échoue, et c'est le seul historique
+    consultable après coup.
+    """
+
+    def __init__(self, destinataire: str, fournisseur: FournisseurCourriel) -> None:
+        self.destinataire = destinataire
+        self.fournisseur = fournisseur
+
+    async def envoyer(self, evenement: str, **contexte: Any) -> None:
+        log.error(
+            "alerte_admin",
+            alerte=evenement,
+            destinataire=self.destinataire,
+            canal="courriel",
+            **contexte,
+        )
+        try:
+            await self.fournisseur.envoyer_message(
+                self.destinataire, f"[JobBot] {evenement}", _corps(contexte)
+            )
+        except Exception as exc:
+            # Volontairement large : l'appelant est au milieu d'un chemin
+            # d'erreur (plafond atteint, scraper cassé) et ne peut rien faire
+            # de cette exception. Une alerte qui explose en signalant un
+            # incident aggrave l'incident. Le log ci-dessus est déjà parti.
+            log.error("alerte_admin_envoi_echoue", alerte=evenement, erreur=str(exc))
+
+
 def construire_alerte(settings: Settings) -> AlerteAdmin:
     """Canal d'alerte à utiliser, selon la configuration."""
-    return AlerteJournalisee(admin_telegram_id=settings.admin_telegram_id)
+    if not settings.admin_courriel:
+        return AlerteJournalisee()
+    return AlerteCourriel(settings.admin_courriel, construire_fournisseur(settings))

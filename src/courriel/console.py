@@ -23,3 +23,11 @@ class CourrielConsole:
             code=code,
             rappel="Aucun email n'a été envoyé. Voir CLAUDE.md §14.1 (nom de domaine).",
         )
+
+    async def envoyer_message(self, destinataire: str, sujet: str, corps: str) -> None:
+        log.warning(
+            "message_non_envoye_mode_console",
+            destinataire=destinataire,
+            sujet=sujet,
+            corps=corps,
+        )

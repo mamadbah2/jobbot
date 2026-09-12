@@ -115,9 +115,13 @@ class FournisseurCourrielEspion:
 
     def __init__(self) -> None:
         self.envois: list[tuple[str, str]] = []
+        self.messages: list[tuple[str, str, str]] = []
 
     async def envoyer_code(self, destinataire: str, code: str) -> None:
         self.envois.append((destinataire, code))
+
+    async def envoyer_message(self, destinataire: str, sujet: str, corps: str) -> None:
+        self.messages.append((destinataire, sujet, corps))
 
 
 @pytest.fixture

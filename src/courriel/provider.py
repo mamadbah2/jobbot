@@ -16,10 +16,17 @@ from src.courriel.console import CourrielConsole
 
 
 class FournisseurCourriel(Protocol):
-    """Canal d'envoi du code de vérification."""
+    """Canal d'envoi vers une adresse email."""
 
     async def envoyer_code(self, destinataire: str, code: str) -> None:
-        """Transmet le code à l'adresse indiquée."""
+        """Transmet le code de vérification à l'adresse indiquée."""
+        ...
+
+    async def envoyer_message(self, destinataire: str, sujet: str, corps: str) -> None:
+        """Transmet un message quelconque. Sert aux alertes d'exploitation
+        (`src/alerting.py`), jamais à un recruteur : le service n'écrit à
+        personne d'autre que ses propres utilisateurs et son administrateur
+        (CLAUDE.md §2, interdiction n°1, et §7)."""
         ...
 
 
