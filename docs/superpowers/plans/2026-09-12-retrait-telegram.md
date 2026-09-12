@@ -18,7 +18,7 @@
 - **L'interpréteur est `.venv/bin/python` du worktree.** Son `.pth` éditable pointe sur le worktree ; utiliser le venv du dépôt principal ferait tester le mauvais code.
 - **La base de développement est PARTAGÉE avec le dépôt principal et porte 232 offres réelles.** Ne jamais exécuter `docker compose down -v`, ni `alembic downgrade`, ni `DROP DATABASE`. Vérifier `select count(*) from jobs` = 232 avant et après toute migration.
 - **`docker compose` ne fonctionne pas depuis le worktree** : `.env` est gitignoré, donc absent ici. Pour lire la base, utiliser `docker exec jobbot-postgres-1 psql -U jobbot -d jobbot -c '…'`. Pour lancer la pile, se placer dans le dépôt principal.
-- **État de départ : la suite est ROUGE** — `334 passed, 2 failed`. Les deux échecs sont `tests/test_bot_compte.py::test_numero_etranger_normalisation_reelle_ne_touche_pas_la_base[hors_senegal]` et `[invalide_sans_indicatif_senegalais]`, cassés par les commits non poussés qui ont retiré la recherche par numéro de `lier_telegram`. La Tâche 1 supprime ce fichier ; ne pas chercher à les réparer.
+- **État de départ : la branche est ROUGE, pytest ET mypy.** `pytest -q` donne `334 passed, 2 failed` ; `mypy src/` donne `Unexpected keyword argument "telephone_saisi" for "lier_telegram"` à `src/bot/handlers/compte.py:75` (57 fichiers vérifiés). Les deux viennent des commits non poussés qui ont retiré la recherche par numéro de `lier_telegram` sans réaligner son appelant, et les deux disparaissent avec `src/bot/` en Tâche 1. Les deux échecs pytest sont `tests/test_bot_compte.py::test_numero_etranger_normalisation_reelle_ne_touche_pas_la_base[hors_senegal]` et `[invalide_sans_indicatif_senegalais]`. Ne pas chercher à réparer l'un ou l'autre : c'est du travail sur du code condamné.
 - Type hints partout. `mypy --strict` doit passer sur `src/` (`files = ["src"]`).
 - `ruff check src/ tests/` doit passer. Longueur de ligne : 100.
 - Aucun `print()` : `structlog` uniquement, via `src.logging_setup.get_logger`.
@@ -65,7 +65,7 @@
 
 **Interfaces:**
 - Consomme : rien.
-- Produit : `tests/test_retrait_telegram_telephone.py` avec les helpers `_fichiers_src()` et `_modules_importes(fichier)`, réutilisés par les Tâches 2, 3 et 6 pour y ajouter leurs gardes.
+- Produit : `tests/test_retrait_telegram_telephone.py`, le fichier de gardes auquel les Tâches 2, 3 et 6 ajoutent les leurs. Ce qu'elles en consomment, ce sont ses imports de tête (`tomllib`, `Path`) et son existence — **pas** ses helpers `_fichiers_src()` / `_modules_importes()`, qui ne servent qu'aux deux tests de cette tâche.
 
 - [ ] **Step 1 : écrire le test qui échoue**
 
@@ -868,8 +868,6 @@ même protocole `AlerteAdmin` : aucun appelant ne change.
 
 from __future__ import annotations
 
-from typing import Any
-
 import pytest
 from structlog.testing import capture_logs
 
@@ -959,12 +957,7 @@ def test_le_reglage_telegram_de_l_admin_n_existe_plus() -> None:
 
     assert "admin_telegram_id" not in Settings.model_fields
 
-
-def _inutilise(_: Any) -> None:  # pragma: no cover
-    """Présent pour garder `Any` importé si un test futur en a besoin."""
 ```
-
-Supprimer le helper `_inutilise` s'il déclenche un avertissement ruff ; retirer alors l'import `Any`.
 
 - [ ] **Step 2 : lancer les tests pour vérifier qu'ils échouent**
 
@@ -1146,7 +1139,7 @@ et initialiser `self.messages: list[tuple[str, str, str]] = []` dans son `__init
 - [ ] **Step 9 : lancer la suite complète**
 
 Run: `.venv/bin/python -m pytest -q && RUN_INTEGRATION_TESTS=1 .venv/bin/python -m pytest -m integration -q`
-Expected: tout vert. Attention : un test de `tests/test_api_moi.py` ou de `tests/test_sante_scraper.py` peut construire `AlerteJournalisee(admin_telegram_id=…)` ; corriger l'appel en `AlerteJournalisee()`.
+Expected: tout vert. `AlerteJournalisee(` n'est construit nulle part ailleurs que dans `tests/test_alerting.py`, que ce Step 1 réécrit entièrement — vérifié avant l'écriture de ce plan, il n'y a pas d'autre site d'appel à corriger.
 
 - [ ] **Step 10 : vérifier ruff et mypy**
 
@@ -1201,15 +1194,17 @@ def test_aucune_valeur_n_est_obligatoire(monkeypatch: pytest.MonkeyPatch) -> Non
     démarrer sans elle. Depuis son retrait, `.env.example` se copie et la pile
     démarre sans qu'une seule valeur soit renseignée — c'est le critère de
     validation de la Phase 0 (CLAUDE.md §12), désormais vrai sans réserve."""
-    for cle in list(os.environ):
-        if cle.isupper():
-            monkeypatch.delenv(cle, raising=False)
+    # Seuls les noms que `Settings` lit, et pas toutes les variables en
+    # majuscules : effacer PATH, HOME ou LANG le temps d'un test est
+    # gratuitement dangereux, même si monkeypatch les restaure ensuite.
+    for champ in Settings.model_fields:
+        monkeypatch.delenv(champ.upper(), raising=False)
     get_settings.cache_clear()
     reglages = Settings()  # type: ignore[call-arg]
     assert reglages.environment == "dev"
 ```
 
-Ajouter `import os` en tête du fichier.
+Aucun import supplémentaire : `Settings` et `get_settings` sont déjà importés par ce fichier.
 
 Ajouter à `tests/test_retrait_telegram_telephone.py` :
 
