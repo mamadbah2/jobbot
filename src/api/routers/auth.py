@@ -185,17 +185,19 @@ async def verifier_code(
         utilisateur = await comptes.connecter_ou_inscrire(
             session,
             adresse=adresse,
-            telephone_saisi=corps.telephone,
             nom_complet=corps.nom_complet,
         )
     except ErreurMetier:
         # `verifier` a déjà consommé le code, avant même que `connecter_ou_inscrire`
-        # ne soit appelé. `InscriptionIncomplete` (nom/téléphone manquants),
-        # `NumeroInvalide` (faute de frappe la plus banale du parcours),
-        # `NomInvalide` et `TelephoneDejaUtilise` sont tous des erreurs de
-        # SAISIE : l'utilisateur doit pouvoir corriger et resoumettre sans
-        # redemander un email, attendre le cooldown et entamer son quota
-        # d'envois (§11 : l'abandon en onboarding est le risque principal).
+        # ne soit appelé. `InscriptionIncomplete` (nom manquant) et `NomInvalide`
+        # sont des erreurs de SAISIE : l'utilisateur doit pouvoir corriger et
+        # resoumettre sans redemander un email, attendre le cooldown et entamer
+        # son quota d'envois (§11 : l'abandon en onboarding est le risque
+        # principal). Depuis le 2026-09-12, `connecter_ou_inscrire` ne prend
+        # plus de téléphone : `NumeroInvalide` et `TelephoneDejaUtilise` ne
+        # peuvent plus être levées ici (elles restent possibles côté
+        # `comptes.definir_telephone`, appelée ailleurs, une fois le compte
+        # identifié).
         await codes.deposer(
             cache,
             adresse,

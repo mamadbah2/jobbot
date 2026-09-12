@@ -19,7 +19,6 @@ class DemandeCode(BaseModel):
 class VerificationCode(BaseModel):
     email: str = Field(min_length=1, max_length=320)
     code: str = Field(min_length=1, max_length=12)
-    telephone: str | None = Field(default=None, max_length=32)
     nom_complet: str | None = Field(default=None, max_length=255)
 
 
@@ -32,7 +31,7 @@ class Utilisateur(BaseModel):
 
     id: int
     email: str
-    telephone: str
+    telephone: str | None
     nom_complet: str | None
     telegram_lie: bool
     etat: str
