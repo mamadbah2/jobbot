@@ -65,3 +65,31 @@ def test_aucun_reglage_de_liaison_telegram() -> None:
     from src.config import Settings
 
     assert "telegram_bot_username" not in Settings.model_fields
+
+
+def test_le_module_de_normalisation_telephonique_n_existe_plus() -> None:
+    assert not Path("src/core/telephone.py").exists()
+
+
+def test_phonenumbers_n_est_plus_une_dependance_declaree() -> None:
+    projet = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))
+    declarees = " ".join(projet["project"]["dependencies"]).lower()
+    assert "phonenumbers" not in declarees
+
+
+def test_les_fonctions_telephone_et_telegram_ont_disparu_des_comptes() -> None:
+    """Elles portaient la pose d'un numéro et la liaison d'un telegram_id sur un
+    compte. Les ressusciter sans colonne les ferait échouer à l'exécution, pas
+    à l'import : cette assertion est ce qui rend le retrait visible."""
+    from src.core.auth import comptes
+
+    for nom in ("par_telephone", "par_telegram", "lier_telegram", "definir_telephone"):
+        assert not hasattr(comptes, nom), f"comptes.{nom} est de retour"
+
+
+def test_les_exceptions_du_telephone_et_de_telegram_ont_disparu() -> None:
+    from src.core import erreurs
+
+    for nom in ("NumeroInvalide", "TelephoneDejaUtilise", "ContactUsurpe", "TelegramDejaLie"):
+        assert not hasattr(erreurs, nom), f"erreurs.{nom} est de retour"
+        assert nom not in erreurs.__all__

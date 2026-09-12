@@ -8,13 +8,12 @@ Deux règles portent tout le reste :
 2. **Un compte existant ignore les champs fournis.** Sinon `/auth/code/verifie`
    deviendrait un moyen d'écraser le nom d'un compte existant.
 
-Depuis le 2026-09-12, ce module ne prend plus de numéro de téléphone à
-l'inscription ni pour la liaison Telegram (migration 0004) : le code à
-6 chiffres ne prouvait que la possession de l'adresse email, jamais celle
-d'un numéro saisi au clavier, et cette confusion permettait de squatter le
-numéro d'autrui. Le téléphone n'est posé que par `definir_telephone`, à
-partir d'un canal qui le certifie lui-même (liaison Telegram aujourd'hui,
-webhook mobile money en Phase 6).
+Depuis le 2026-09-12, l'identité d'un compte est son adresse email, et rien
+d'autre. Le numéro de téléphone a été retiré de `users` : le code à 6 chiffres
+ne prouvait que la possession de l'adresse, jamais celle d'un numéro, et cette
+confusion permettait de squatter le numéro d'autrui. Le numéro réapparaîtra en
+Phase 3 dans `profiles.structured`, extrait du CV, sans prétention de
+vérification. `telegram_id` est parti avec le client Telegram.
 """
 
 from __future__ import annotations
@@ -23,13 +22,8 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.core import courriel_valide, telephone
-from src.core.erreurs import (
-    InscriptionIncomplete,
-    NomInvalide,
-    TelegramDejaLie,
-    TelephoneDejaUtilise,
-)
+from src.core import courriel_valide
+from src.core.erreurs import InscriptionIncomplete, NomInvalide
 from src.core.saisie import texte_saisi
 from src.db.models import User
 
@@ -41,32 +35,13 @@ async def par_adresse(session: AsyncSession, adresse: str) -> User | None:
     return resultat.scalar_one_or_none()
 
 
-async def par_telephone(session: AsyncSession, numero: str) -> User | None:
-    resultat = await session.execute(
-        select(User).where(User.phone == telephone.normaliser(numero))
-    )
-    return resultat.scalar_one_or_none()
-
-
-async def par_telegram(session: AsyncSession, telegram_id: int) -> User | None:
-    resultat = await session.execute(select(User).where(User.telegram_id == telegram_id))
-    return resultat.scalar_one_or_none()
-
-
 async def connecter_ou_inscrire(
     session: AsyncSession,
     *,
     adresse: str,
     nom_complet: str | None = None,
 ) -> User:
-    """Rend le compte existant, ou en crée un. L'adresse est déjà prouvée.
-
-    Ne prend plus de numéro de téléphone depuis le 2026-09-12 : un numéro saisi
-    ici ne serait prouvé par rien (le code à 6 chiffres ne prouve que la
-    possession de l'adresse), et permettait de squatter le numéro d'autrui —
-    voir la migration 0004. Le téléphone se pose désormais uniquement via
-    `definir_telephone`, à partir d'un canal qui le certifie.
-    """
+    """Rend le compte existant, ou en crée un. L'adresse est déjà prouvée."""
     normalisee = courriel_valide.normaliser(adresse)
 
     existant = await par_adresse(session, normalisee)
@@ -91,58 +66,14 @@ async def connecter_ou_inscrire(
     except IntegrityError:
         # Course : une requête concurrente a créé le compte entre notre SELECT
         # et notre INSERT. Fréquent quand l'utilisateur tape deux fois sur
-        # « Valider » sur une connexion instable (§11). La seule contrainte
-        # d'unicité que cet INSERT peut heurter est désormais `email` (le
-        # téléphone n'est plus posé ici) : si `deja` reste introuvable, la
-        # cause est autre et inconnue, on laisse l'IntegrityError remonter
-        # plutôt que de la traduire en une erreur métier qui mentirait sur
-        # la cause.
+        # « Valider » sur une connexion instable (§11). `email` est désormais la
+        # SEULE contrainte d'unicité de la table : si `deja` reste introuvable,
+        # la cause est autre et inconnue, on laisse l'IntegrityError remonter
+        # plutôt que de la traduire en une erreur métier qui mentirait.
         deja = await par_adresse(session, normalisee)
         if deja is not None:
             return deja
         raise
-    return utilisateur
-
-
-async def lier_telegram(session: AsyncSession, *, utilisateur: User, telegram_id: int) -> User:
-    """Rattache un identifiant Telegram à un utilisateur déjà identifié.
-
-    Depuis le 2026-09-12, cette fonction NE recherche PLUS de compte par
-    numéro de téléphone : c'était le vecteur d'une usurpation — un attaquant
-    s'inscrivait avec le numéro d'une victime, qui se serait alors vue
-    rattachée, via cette même fonction, au compte de l'attaquant en partageant
-    son contact Telegram. L'appelant doit désormais avoir déjà identifié
-    `utilisateur` par un canal fiable (session web authentifiée, jeton de
-    liaison à usage unique) avant d'appeler cette fonction.
-    """
-    proprietaire = await par_telegram(session, telegram_id)
-    if proprietaire is not None and proprietaire.id != utilisateur.id:
-        raise TelegramDejaLie(TelegramDejaLie.code)
-
-    utilisateur.telegram_id = telegram_id
-    await session.flush()
-    return utilisateur
-
-
-async def definir_telephone(
-    session: AsyncSession, *, utilisateur: User, telephone_saisi: str
-) -> User:
-    """Pose un numéro vérifié sur un compte déjà identifié.
-
-    Cette fonction NE VÉRIFIE PAS que le numéro appartient à `utilisateur` —
-    elle ne le peut pas. L'appelant doit avoir obtenu ce numéro d'un canal qui
-    le vérifie lui-même : aujourd'hui uniquement le bouton natif « partager mon
-    contact » de Telegram (Telegram certifie que le numéro appartient à
-    l'expéditeur), et le webhook mobile money en Phase 6. Ne jamais l'appeler
-    avec un numéro simplement saisi au clavier par l'utilisateur.
-    """
-    numero = telephone.normaliser(telephone_saisi)
-    proprietaire = await par_telephone(session, numero)
-    if proprietaire is not None and proprietaire.id != utilisateur.id:
-        raise TelephoneDejaUtilise(TelephoneDejaUtilise.code)
-
-    utilisateur.phone = numero
-    await session.flush()
     return utilisateur
 
 

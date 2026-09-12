@@ -193,11 +193,11 @@ async def verifier_code(
         # sont des erreurs de SAISIE : l'utilisateur doit pouvoir corriger et
         # resoumettre sans redemander un email, attendre le cooldown et entamer
         # son quota d'envois (§11 : l'abandon en onboarding est le risque
-        # principal). Depuis le 2026-09-12, `connecter_ou_inscrire` ne prend
-        # plus de téléphone : `NumeroInvalide` et `TelephoneDejaUtilise` ne
-        # peuvent plus être levées ici (elles restent possibles côté
-        # `comptes.definir_telephone`, appelée ailleurs, une fois le compte
-        # identifié).
+        # principal).
+        #
+        # Aucun téléphone ici : depuis le 2026-09-12 l'identité d'un compte est
+        # son adresse email et rien d'autre (migration 0005). Le numéro
+        # réapparaîtra en Phase 3 dans le profil, extrait du CV.
         await codes.deposer(
             cache,
             adresse,

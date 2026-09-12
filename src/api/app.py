@@ -16,16 +16,12 @@ from src.core.erreurs import (
     CodeExpire,
     CodeInvalide,
     CompteInexistant,
-    ContactUsurpe,
     EnvoiImpossible,
     ErreurMetier,
     InscriptionIncomplete,
     JetonInvalide,
     NomInvalide,
-    NumeroInvalide,
     PlafondGlobalAtteint,
-    TelegramDejaLie,
-    TelephoneDejaUtilise,
     TropDeDemandes,
 )
 from src.logging_setup import get_logger
@@ -46,11 +42,8 @@ _STATUTS: dict[type[ErreurMetier], int] = {
     # (celui du brief) est marqué déprécié par Starlette dans la version installée
     # ici et lève un avertissement à l'import — même valeur numérique (422).
     AdresseInvalide: status.HTTP_422_UNPROCESSABLE_CONTENT,
-    NumeroInvalide: status.HTTP_422_UNPROCESSABLE_CONTENT,
     NomInvalide: status.HTTP_422_UNPROCESSABLE_CONTENT,
     InscriptionIncomplete: status.HTTP_422_UNPROCESSABLE_CONTENT,
-    TelephoneDejaUtilise: status.HTTP_409_CONFLICT,
-    TelegramDejaLie: status.HTTP_409_CONFLICT,
     TropDeDemandes: status.HTTP_429_TOO_MANY_REQUESTS,
     PlafondGlobalAtteint: status.HTTP_503_SERVICE_UNAVAILABLE,
     JetonInvalide: status.HTTP_401_UNAUTHORIZED,
@@ -60,7 +53,6 @@ _STATUTS: dict[type[ErreurMetier], int] = {
     # pas le défaut 400 par omission (revue finale, corrections mineures).
     CodeInvalide: status.HTTP_400_BAD_REQUEST,
     CodeExpire: status.HTTP_400_BAD_REQUEST,
-    ContactUsurpe: status.HTTP_400_BAD_REQUEST,
 }
 
 
