@@ -207,7 +207,7 @@ def test_le_client_de_production_ne_suit_pas_les_redirections() -> None:
     from src.ingest.sources.emploidakar import EmploiDakarScraper
     from src.worker_ingest import construire_client
 
-    settings = Settings(TELEGRAM_BOT_TOKEN="1:x")  # type: ignore[call-arg]
+    settings = Settings()  # type: ignore[call-arg]
     poli = construire_client(EmploiDakarScraper, settings)
     assert poli._client.follow_redirects is False
 
@@ -221,7 +221,7 @@ async def test_le_client_de_production_refuse_un_hote_etranger() -> None:
     from src.ingest.sources.emploidakar import EmploiDakarScraper
     from src.worker_ingest import construire_client
 
-    settings = Settings(TELEGRAM_BOT_TOKEN="1:x")  # type: ignore[call-arg]
+    settings = Settings()  # type: ignore[call-arg]
     poli = construire_client(EmploiDakarScraper, settings)
     with pytest.raises(CheminInterditError):
         await poli.get("https://collecteur-externe.example/exfiltration?d=1")

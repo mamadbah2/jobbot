@@ -14,7 +14,6 @@ from pydantic import Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 Environment = Literal["dev", "prod"]
-TelegramMode = Literal["polling", "webhook"]
 
 
 class Settings(BaseSettings):
@@ -30,15 +29,6 @@ class Settings(BaseSettings):
     # --- Général ---
     environment: Environment = "dev"
     log_level: str = "INFO"
-
-    # --- Telegram ---
-    telegram_bot_token: SecretStr
-    telegram_mode: TelegramMode = "polling"
-    # Volontairement court : le FAI local coupe api.telegram.org par intermittence
-    # et un long-poll de 30 s expire côté client avant côté serveur (CLAUDE.md §15).
-    telegram_long_poll_timeout: int = Field(default=2, ge=1, le=50)
-    telegram_webhook_url: str = ""
-    telegram_webhook_secret: SecretStr = SecretStr("")
 
     # --- PostgreSQL ---
     postgres_host: str = "postgres"
@@ -180,4 +170,4 @@ class Settings(BaseSettings):
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:
     """Instance unique, mise en cache. Les tests appellent `get_settings.cache_clear()`."""
-    return Settings()  # type: ignore[call-arg]  # les champs viennent de l'environnement
+    return Settings()

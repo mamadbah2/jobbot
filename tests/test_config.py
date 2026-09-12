@@ -8,11 +8,20 @@ from pydantic import ValidationError
 from src.config import Settings, get_settings
 
 
-def test_token_obligatoire(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delenv("TELEGRAM_BOT_TOKEN", raising=False)
+def test_aucune_valeur_n_est_obligatoire(monkeypatch: pytest.MonkeyPatch) -> None:
+    """`TELEGRAM_BOT_TOKEN` était la seule valeur obligatoire du projet, et
+    l'était pour TOUS les processus : l'API et les workers refusaient de
+    démarrer sans elle. Depuis son retrait, `.env.example` se copie et la pile
+    démarre sans qu'une seule valeur soit renseignée — c'est le critère de
+    validation de la Phase 0 (CLAUDE.md §12), désormais vrai sans réserve."""
+    # Seuls les noms que `Settings` lit, et pas toutes les variables en
+    # majuscules : effacer PATH, HOME ou LANG le temps d'un test est
+    # gratuitement dangereux, même si monkeypatch les restaure ensuite.
+    for champ in Settings.model_fields:
+        monkeypatch.delenv(champ.upper(), raising=False)
     get_settings.cache_clear()
-    with pytest.raises(ValidationError):
-        Settings()  # type: ignore[call-arg]
+    reglages = Settings()  # type: ignore[call-arg]
+    assert reglages.environment == "dev"
 
 
 def test_defauts_metier() -> None:

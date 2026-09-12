@@ -104,3 +104,17 @@ def test_le_modele_n_expose_plus_phone_ni_telegram_id() -> None:
 
     assert not hasattr(User, "phone")
     assert not hasattr(User, "telegram_id")
+
+
+def test_aucun_reglage_telegram_ne_subsiste() -> None:
+    from src.config import Settings
+
+    restants = [nom for nom in Settings.model_fields if "telegram" in nom]
+    assert not restants, f"réglages Telegram encore déclarés : {restants}"
+
+
+def test_aucune_variable_telegram_dans_l_exemple_d_environnement() -> None:
+    """`.env.example` est public (le dépôt est public) et sert de référence de
+    déploiement : une variable morte y ferait croire qu'il faut la renseigner."""
+    contenu = Path(".env.example").read_text(encoding="utf-8")
+    assert "TELEGRAM" not in contenu.upper()

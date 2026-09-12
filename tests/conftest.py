@@ -26,7 +26,6 @@ from src.config import Settings, get_settings
 from src.db.models import User
 
 _ENV_MINIMAL = {
-    "TELEGRAM_BOT_TOKEN": "123456:TOKEN_DE_TEST",
     "POSTGRES_HOST": "localhost",
     "POSTGRES_PASSWORD": "motdepasse_test",
 }
