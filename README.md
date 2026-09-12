@@ -1,6 +1,6 @@
 # JobBot Sénégal
 
-Bot Telegram de candidature assistée pour le marché de l'emploi sénégalais.
+Candidature assistée pour le marché de l'emploi sénégalais.
 Voir `CLAUDE.md` pour le brief complet.
 
 ## Lancer l'API
@@ -25,18 +25,22 @@ docker compose logs api --since 1m | grep courriel_non_envoye_mode_console
 # 3. S'inscrire avec ce code
 curl -s -X POST localhost:8080/auth/code/verifie -c /tmp/cookies.txt \
   -H 'content-type: application/json' \
-  -d '{"email":"vous@example.sn","code":"<LE CODE>","telephone":"771234567","nom_complet":"Votre Nom"}'
+  -d '{"email":"vous@example.sn","code":"<LE CODE>","nom_complet":"Votre Nom"}'
 
 # 4. Vérifier la session
 curl -s localhost:8080/moi -b /tmp/cookies.txt
+
+# 5. Se reconnecter : le MÊME `id` doit revenir, sans doublon
+#    (répéter 1 → 3, puis comparer l'`id` rendu par /moi)
+
+# 6. Se déconnecter, puis rejouer le cookie : 401 attendu
+curl -s -X POST localhost:8080/auth/deconnexion -b /tmp/cookies.txt -i | head -1
+curl -s localhost:8080/moi -b /tmp/cookies.txt -i | head -1
 ```
 
-Puis, dans Telegram : `/compte` → « Partager mon numéro » avec **le même numéro** →
-attendre `COMPTE_LIE`. Re-vérifier `GET /moi` : `telegram_lie` doit être passé à `true`,
-et `GET /moi` doit rendre **le même `id`** qu'à l'étape 3 — c'est le critère de
-validation n°2 de la spec (aucun doublon entre le web et Telegram).
+Les étapes 1 à 6 couvrent les critères de validation 1 à 3 de la Phase 2 (`CLAUDE.md` §12).
 
-> L'équivalent automatisé de ce parcours (demande → vérification → session → liaison)
+> L'équivalent automatisé de ce parcours (demande → vérification → session → déconnexion)
 > est couvert par les tests d'intégration : `RUN_INTEGRATION_TESTS=1 pytest -m integration`.
 
 ## Liste de contrôle avant mise en production

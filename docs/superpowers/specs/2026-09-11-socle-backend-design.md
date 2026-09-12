@@ -3,6 +3,16 @@
 > Design validé par le porteur du projet le 2026-09-11.
 > Ce document est la source de vérité de la Phase 2. Le plan d'implémentation en découle.
 
+> ⚠️ **Révisé le 2026-09-12 par `2026-09-12-retrait-telegram-design.md`.** Telegram cesse d'être un
+> client du produit et le téléphone quitte la table d'identité. Ce document est **conservé tel
+> quel** : il dit ce qui a été conçu le 2026-09-11, et le comprendre aide à comprendre ce qui a
+> suivi. Mais il n'est plus la source de vérité sur ces points. Sont **caducs** : la ligne
+> « Téléphone » du §2, le processus `bot` du §4, `phone` et `telegram_id` du §5,
+> `core/telephone.py` du §6, la ligne `/moi/telegram/jeton` et le champ `telephone` du §8, le
+> **§9 en entier** (liaison Telegram), `phonenumbers` du §12, les tests Telegram et téléphone du
+> §13, et les critères de validation du §15 — réécrits au §8 de la spec du 2026-09-12 et repris
+> dans `CLAUDE.md` §12.
+
 ---
 
 ## 1. Pourquoi ce virage, et pourquoi maintenant
@@ -212,16 +222,10 @@ l'adresse vérifiée du propriétaire du compte. Le domaine ne devient indispens
 2. **Le nom est fourni à la vérification, pas à la demande.** On ne crée une ligne `users` qu'après
    un code valide. Sinon n'importe qui remplit la table avec des adresses qu'il ne possède pas.
 
-> **Correction du 2026-09-12.** Cette section disait à l'origine que le téléphone était, comme le
-> nom, fourni à la vérification, et que cela suffisait à protéger `phone UNIQUE` contre un numéro
-> d'autrui. C'était faux : un code valide à ce stade ne prouve que la possession de **l'adresse
-> email**, jamais celle d'un numéro simplement saisi dans le même formulaire. Un attaquant pouvait
-> donc s'inscrire avec sa propre adresse et le numéro d'une victime — qui se retrouvait ensuite
-> bloquée (`TelephoneDejaUtilise`) et dont le contact Telegram partagé se serait rattaché au compte
-> de l'attaquant, `lier_telegram` retrouvant alors un compte par ce numéro. Le porteur du projet a
-> tranché le 2026-09-12 : le téléphone n'est plus collecté à l'inscription du tout. Il n'est posé
-> que par un canal qui le vérifie lui-même — la liaison Telegram (`comptes.definir_telephone`), et
-> plus tard le webhook mobile money (§10 de `CLAUDE.md`). Voir migration `0004` et `CLAUDE.md` §5.
+> **Supprimé le 2026-09-12.** Cette section portait ici une affirmation **fausse** sur
+> `phone UNIQUE` : elle prétendait qu'un code valide protégeait le numéro saisi, alors qu'il ne
+> prouve que la possession de l'adresse email. Elle est supprimée avec la colonne qu'elle
+> décrivait, et non corrigée. Le sujet est traité par `2026-09-12-retrait-telegram-design.md`.
 
 ### Un seul endpoint pour l'inscription et la reconnexion
 
