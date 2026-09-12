@@ -24,6 +24,24 @@ async def test_le_fournisseur_console_previent_qu_il_n_envoie_rien() -> None:
     assert any(e.get("event") == "courriel_non_envoye_mode_console" for e in journal)
 
 
+async def test_le_fournisseur_console_journalise_le_message() -> None:
+    with capture_logs() as journal:
+        await CourrielConsole().envoyer_message(
+            "admin@jobbot.sn", "[JobBot] scraper_casse", "source : emploidakar"
+        )
+    assert any(e.get("destinataire") == "admin@jobbot.sn" for e in journal)
+    assert any(e.get("sujet") == "[JobBot] scraper_casse" for e in journal)
+    assert any(e.get("corps") == "source : emploidakar" for e in journal)
+
+
+async def test_le_fournisseur_console_previent_qu_il_n_envoie_pas_le_message() -> None:
+    """Même exigence que pour le code (CLAUDE.md §7) : personne ne doit croire
+    qu'un message est réellement parti."""
+    with capture_logs() as journal:
+        await CourrielConsole().envoyer_message("admin@jobbot.sn", "sujet", "corps")
+    assert any(e.get("event") == "message_non_envoye_mode_console" for e in journal)
+
+
 def test_console_est_le_defaut() -> None:
     assert isinstance(construire_fournisseur(get_settings()), CourrielConsole)
 

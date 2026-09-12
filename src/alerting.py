@@ -14,6 +14,18 @@ tranché — contrairement aux emails vers de vrais utilisateurs.
 Sans `ADMIN_COURRIEL`, on retombe sur le log : c'est un état dégradé mais
 fonctionnel, et l'événement le dit explicitement pour qu'on ne croie pas
 l'alerte transmise.
+
+Arbitrage volontairement opposé à celui de `src/courriel/provider.py` :
+`construire_fournisseur` lève sans repli sur un `FOURNISSEUR_COURRIEL`
+inconnu, parce qu'il protège l'envoi des **codes de vérification** (§2,
+interdiction n°2) — un repli silencieux y enverrait les codes en clair dans
+les logs. `construire_alerte` rattrape cette même levée, parce qu'elle est
+appelée par des chemins qui n'ont rien à voir avec l'incident qu'ils
+signalent : `deps.py` la reconstruit à chaque `POST /auth/code/demande`,
+`worker_ingest.py` avant même la boucle sur les sources. Une faute de frappe
+dans `FOURNISSEUR_COURRIEL` ne doit pas faire tomber l'inscription ni
+l'ingestion — elle doit seulement dégrader l'alerte en log, de façon
+visible.
 """
 
 from __future__ import annotations
@@ -86,7 +98,25 @@ class AlerteCourriel:
 
 
 def construire_alerte(settings: Settings) -> AlerteAdmin:
-    """Canal d'alerte à utiliser, selon la configuration."""
+    """Canal d'alerte à utiliser, selon la configuration.
+
+    Ne lève jamais : ni `deps.py` (dépendance FastAPI reconstruite à chaque
+    requête d'inscription) ni `worker_ingest.py` (construite avant la boucle
+    sur les sources, hors du `try/except` qui protège chacune) n'ont de motif
+    métier de tomber pour une variable d'environnement fautive. Si
+    `construire_fournisseur` refuse `FOURNISSEUR_COURRIEL`, on le journalise
+    explicitement et on retombe sur `AlerteJournalisee` plutôt que de
+    propager l'exception.
+    """
     if not settings.admin_courriel:
         return AlerteJournalisee()
-    return AlerteCourriel(settings.admin_courriel, construire_fournisseur(settings))
+    try:
+        fournisseur = construire_fournisseur(settings)
+    except ValueError as exc:
+        log.error(
+            "alerte_admin_fournisseur_invalide",
+            fournisseur_courriel=settings.fournisseur_courriel,
+            erreur=str(exc),
+        )
+        return AlerteJournalisee()
+    return AlerteCourriel(settings.admin_courriel, fournisseur)

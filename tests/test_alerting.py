@@ -94,3 +94,24 @@ def test_le_reglage_telegram_de_l_admin_n_existe_plus() -> None:
     from src.config import Settings
 
     assert "admin_telegram_id" not in Settings.model_fields
+
+
+def test_la_fabrique_retombe_sur_le_log_si_le_fournisseur_est_invalide(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Round de correction 1 : `construire_alerte` est appelée par des chemins
+    qui n'ont rien à voir avec l'incident qu'ils signalent (`deps.py` à chaque
+    inscription, `worker_ingest.py` avant la boucle sur les sources). Une
+    faute de frappe dans `FOURNISSEUR_COURRIEL` ne doit donc jamais y faire
+    lever d'exception — seulement dégrader l'alerte en log, de façon visible."""
+    monkeypatch.setenv("ADMIN_COURRIEL", "admin@jobbot.sn")
+    monkeypatch.setenv("FOURNISSEUR_COURRIEL", "sendgrid")
+    get_settings.cache_clear()
+    with capture_logs() as journal:
+        alerte = construire_alerte(get_settings())
+    assert isinstance(alerte, AlerteJournalisee)
+    evenements = [e["event"] for e in journal]
+    assert "alerte_admin_fournisseur_invalide" in evenements
+    entree = next(e for e in journal if e["event"] == "alerte_admin_fournisseur_invalide")
+    assert entree["log_level"] == "error"
+    assert entree["fournisseur_courriel"] == "sendgrid"
