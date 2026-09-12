@@ -93,3 +93,14 @@ def test_les_exceptions_du_telephone_et_de_telegram_ont_disparu() -> None:
     for nom in ("NumeroInvalide", "TelephoneDejaUtilise", "ContactUsurpe", "TelegramDejaLie"):
         assert not hasattr(erreurs, nom), f"erreurs.{nom} est de retour"
         assert nom not in erreurs.__all__
+
+
+def test_le_modele_n_expose_plus_phone_ni_telegram_id() -> None:
+    """Migration 0005 : `users` n'a plus que l'adresse email comme identité.
+    Assertion pure sur la classe, sans base ni réseau : elle doit tourner
+    dans la suite par défaut, pas seulement sous `-m integration`, sinon un
+    retour de ces champs sur `User` ne serait jamais signalé."""
+    from src.db.models import User
+
+    assert not hasattr(User, "phone")
+    assert not hasattr(User, "telegram_id")

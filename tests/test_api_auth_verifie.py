@@ -147,9 +147,9 @@ def test_deux_inscriptions_independantes_sans_telephone(
 ) -> None:
     """La propriété qui remplace l'ancien `test_le_code_survit_a_un_telephone_
     deja_utilise` : deux comptes différents peuvent s'inscrire l'un après
-    l'autre sans jamais entrer en collision sur un numéro, puisqu'aucun des
-    deux n'en fournit — `phone` reste NULL pour les deux (index unique
-    tolérant plusieurs NULL, migration 0004)."""
+    l'autre sans jamais entrer en collision sur un numéro, tout simplement
+    parce qu'aucun numéro n'entre plus nulle part depuis la migration 0005
+    — `users` n'a plus de colonne `phone` du tout."""
     autre_adresse = "autre@jobbot-test.sn"
     autre_code = _code(client_auth, fournisseur_courriel_espion, autre_adresse)
     r1 = client_auth.post(

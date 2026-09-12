@@ -56,14 +56,6 @@ async def test_les_colonnes_telephone_et_telegram_ont_disparu(session: AsyncSess
 
 
 @pytest.mark.integration
-async def test_le_modele_n_expose_plus_ces_champs() -> None:
-    from src.db.models import User
-
-    assert not hasattr(User, "phone")
-    assert not hasattr(User, "telegram_id")
-
-
-@pytest.mark.integration
 async def test_adresse_en_double_refusee(session: AsyncSession) -> None:
     session.add(User(email="d@test.invalid", full_name="D"))
     await session.commit()
