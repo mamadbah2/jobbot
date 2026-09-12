@@ -66,10 +66,15 @@ async def connecter_ou_inscrire(
     except IntegrityError:
         # Course : une requête concurrente a créé le compte entre notre SELECT
         # et notre INSERT. Fréquent quand l'utilisateur tape deux fois sur
-        # « Valider » sur une connexion instable (§11). `email` est désormais la
-        # SEULE contrainte d'unicité de la table : si `deja` reste introuvable,
-        # la cause est autre et inconnue, on laisse l'IntegrityError remonter
-        # plutôt que de la traduire en une erreur métier qui mentirait.
+        # « Valider » sur une connexion instable (§11). La seule contrainte
+        # d'unicité que CET INSERT peut heurter est `email` : il ne pose que
+        # `email`, `full_name` et `state`. Formulation volontairement bornée à
+        # l'INSERT et non à la table — `phone` et `telegram_id` portent encore
+        # un index unique jusqu'à la migration 0005, et une affirmation plus
+        # large serait fausse le temps d'un commit. Si `deja` reste
+        # introuvable, la cause est autre et inconnue : on laisse
+        # l'IntegrityError remonter plutôt que de la traduire en une erreur
+        # métier qui mentirait.
         deja = await par_adresse(session, normalisee)
         if deja is not None:
             return deja
