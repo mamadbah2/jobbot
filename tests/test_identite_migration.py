@@ -1,4 +1,8 @@
-"""Identité : email et téléphone obligatoires, telegram_id facultatif (CLAUDE.md §5).
+"""Identité : email obligatoire, téléphone et telegram_id facultatifs (CLAUDE.md §5).
+
+`phone` est passé nullable le 2026-09-12 (migration 0004) : le code à
+6 chiffres ne prouve que la possession de l'adresse email, jamais celle d'un
+numéro saisi au clavier — voir `src/core/auth/comptes.py`.
 
 Lancer avec : RUN_INTEGRATION_TESTS=1 pytest -m integration
 """
@@ -19,7 +23,7 @@ from src.db.models import User
 def test_modele_user_declare_la_nouvelle_identite() -> None:
     colonnes = {c.name: c for c in User.__table__.columns}
     assert colonnes["email"].nullable is False
-    assert colonnes["phone"].nullable is False
+    assert colonnes["phone"].nullable is True
     assert colonnes["telegram_id"].nullable is True
     assert colonnes["token_version"].nullable is False
     assert colonnes["token_version"].default.arg == 0
@@ -52,7 +56,7 @@ async def test_colonnes_presentes_en_base(session: AsyncSession) -> None:
     )
     etat = {nom: nullable for nom, nullable in lignes.all()}
     assert etat["email"] == "NO"
-    assert etat["phone"] == "NO"
+    assert etat["phone"] == "YES"
     assert etat["telegram_id"] == "YES"
     assert etat["token_version"] == "NO"
 
@@ -69,6 +73,35 @@ async def test_deux_comptes_sans_telegram_acceptes(session: AsyncSession) -> Non
     session.add(User(email="b@test.invalid", phone="+221772222222", full_name="B"))
     session.add(User(email="c@test.invalid", phone="+221773333333", full_name="C"))
     await session.commit()
+
+
+@pytest.mark.integration
+async def test_compte_sans_telephone_accepte(session: AsyncSession) -> None:
+    """Le cœur de la tâche 18 : `phone` peut valoir NULL depuis la migration 0004."""
+    session.add(User(email="g@test.invalid", full_name="G"))
+    await session.commit()
+
+    relu = (
+        await session.execute(text("SELECT phone FROM users WHERE email = 'g@test.invalid'"))
+    ).scalar_one()
+    assert relu is None
+
+
+@pytest.mark.integration
+async def test_deux_comptes_sans_telephone_coexistent(session: AsyncSession) -> None:
+    """Preuve que l'index unique sur `phone` tolère plusieurs NULL : sans ce
+    test, le second compte sans téléphone serait rejeté par la contrainte
+    d'unicité, et personne ne le verrait avant la production."""
+    session.add(User(email="h@test.invalid", full_name="H"))
+    session.add(User(email="i@test.invalid", full_name="I"))
+    await session.commit()
+
+    lignes = await session.execute(
+        text(
+            "SELECT phone FROM users WHERE email IN ('h@test.invalid', 'i@test.invalid')"
+        )
+    )
+    assert [phone for (phone,) in lignes.all()] == [None, None]
 
 
 @pytest.mark.integration

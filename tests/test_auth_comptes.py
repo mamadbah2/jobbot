@@ -1,5 +1,12 @@
 """Comptes (spec Phase 2 §8 et §9).
 
+Depuis le 2026-09-12, `connecter_ou_inscrire` ne prend plus de numéro de
+téléphone (migration 0004 : le code à 6 chiffres ne prouve que la possession
+de l'adresse email, jamais celle d'un numéro saisi au clavier). Le téléphone
+se pose désormais via `definir_telephone`, sur un compte déjà identifié, et
+`lier_telegram` prend directement cet utilisateur plutôt que de le retrouver
+par son numéro.
+
 Lancer avec : RUN_INTEGRATION_TESTS=1 pytest -m integration
 """
 
@@ -15,7 +22,6 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from src.core.auth import comptes
 from src.core.erreurs import (
     AdresseInvalide,
-    CompteInexistant,
     InscriptionIncomplete,
     NomInvalide,
     NumeroInvalide,
@@ -44,123 +50,177 @@ async def session(postgres_url: str) -> AsyncIterator[AsyncSession]:
 
 @pytest.mark.integration
 async def test_inscription_cree_le_compte(session: AsyncSession) -> None:
-    u = await comptes.connecter_ou_inscrire(
-        session, adresse=ADRESSE, telephone_saisi="77 123 45 67", nom_complet="Fatou Diop"
-    )
+    u = await comptes.connecter_ou_inscrire(session, adresse=ADRESSE, nom_complet="Fatou Diop")
     await session.commit()
     assert u.email == ADRESSE
-    assert u.phone == TEL  # normalisé en E.164
     assert u.telegram_id is None
     assert u.token_version == 0
     assert u.state == "onboarding"
 
 
 @pytest.mark.integration
-async def test_reconnexion_ne_redemande_rien(session: AsyncSession) -> None:
-    """Un utilisateur qui revient ne ressaisit jamais son numéro (spec §8)."""
-    await comptes.connecter_ou_inscrire(
-        session, adresse=ADRESSE, telephone_saisi=TEL, nom_complet="Fatou Diop"
+async def test_inscription_sans_telephone_reussit(session: AsyncSession) -> None:
+    """Le cœur de la tâche 18 : le téléphone n'est plus demandé à l'inscription,
+    et `phone` vaut bien NULL en base — pas une chaîne vide ni une valeur
+    fabriquée."""
+    u = await comptes.connecter_ou_inscrire(session, adresse=ADRESSE, nom_complet="Fatou Diop")
+    await session.commit()
+    assert u.phone is None
+
+    relu = await comptes.par_adresse(session, ADRESSE)
+    assert relu is not None
+    assert relu.phone is None
+
+
+@pytest.mark.integration
+async def test_deux_comptes_sans_telephone_coexistent(session: AsyncSession) -> None:
+    """Preuve que l'index unique sur `phone` tolère plusieurs NULL (migration
+    0004) : sans elle, le second compte serait rejeté par la contrainte
+    d'unicité, et personne ne le verrait avant la production."""
+    premier = await comptes.connecter_ou_inscrire(
+        session, adresse=ADRESSE, nom_complet="Fatou Diop"
     )
     await session.commit()
+    second = await comptes.connecter_ou_inscrire(
+        session, adresse="autre@jobbot-test.sn", nom_complet="Autre Personne"
+    )
+    await session.commit()
+
+    assert premier.phone is None
+    assert second.phone is None
+    assert premier.id != second.id
+
+
+@pytest.mark.integration
+async def test_reconnexion_ne_redemande_rien(session: AsyncSession) -> None:
+    """Un utilisateur qui revient ne ressaisit jamais son nom (spec §8)."""
+    await comptes.connecter_ou_inscrire(session, adresse=ADRESSE, nom_complet="Fatou Diop")
+    await session.commit()
     u = await comptes.connecter_ou_inscrire(session, adresse=ADRESSE)
-    assert u.phone == TEL
     assert u.full_name == "Fatou Diop"
 
 
 @pytest.mark.integration
 async def test_reconnexion_ignore_les_champs_fournis(session: AsyncSession) -> None:
-    """Sinon /auth/code/verifie deviendrait un moyen d'écraser le numéro d'un compte."""
-    await comptes.connecter_ou_inscrire(
-        session, adresse=ADRESSE, telephone_saisi=TEL, nom_complet="Fatou Diop"
-    )
+    """Sinon /auth/code/verifie deviendrait un moyen d'écraser le nom d'un compte."""
+    await comptes.connecter_ou_inscrire(session, adresse=ADRESSE, nom_complet="Fatou Diop")
     await session.commit()
-    u = await comptes.connecter_ou_inscrire(
-        session, adresse=ADRESSE, telephone_saisi="+221779999999", nom_complet="Autre Nom"
-    )
-    assert u.phone == TEL
+    u = await comptes.connecter_ou_inscrire(session, adresse=ADRESSE, nom_complet="Autre Nom")
     assert u.full_name == "Fatou Diop"
-
-
-@pytest.mark.integration
-async def test_inscription_sans_telephone_refusee(session: AsyncSession) -> None:
-    with pytest.raises(InscriptionIncomplete):
-        await comptes.connecter_ou_inscrire(session, adresse=ADRESSE, nom_complet="Fatou")
 
 
 @pytest.mark.integration
 async def test_inscription_sans_nom_refusee(session: AsyncSession) -> None:
     with pytest.raises(InscriptionIncomplete):
-        await comptes.connecter_ou_inscrire(session, adresse=ADRESSE, telephone_saisi=TEL)
-
-
-@pytest.mark.integration
-async def test_telephone_deja_pris_par_un_autre_compte(session: AsyncSession) -> None:
-    await comptes.connecter_ou_inscrire(
-        session, adresse=ADRESSE, telephone_saisi=TEL, nom_complet="Fatou"
-    )
-    await session.commit()
-    with pytest.raises(TelephoneDejaUtilise):
-        await comptes.connecter_ou_inscrire(
-            session, adresse="autre@jobbot-test.sn", telephone_saisi=TEL, nom_complet="Autre"
-        )
+        await comptes.connecter_ou_inscrire(session, adresse=ADRESSE)
 
 
 @pytest.mark.integration
 async def test_adresse_normalisee_avant_recherche(session: AsyncSession) -> None:
-    await comptes.connecter_ou_inscrire(
-        session, adresse=ADRESSE, telephone_saisi=TEL, nom_complet="Fatou"
-    )
+    await comptes.connecter_ou_inscrire(session, adresse=ADRESSE, nom_complet="Fatou")
     await session.commit()
     u = await comptes.connecter_ou_inscrire(session, adresse="fatou@JOBBOT-TEST.SN")
     assert u.email == ADRESSE
 
 
 @pytest.mark.integration
-async def test_saisies_invalides_refusees(session: AsyncSession) -> None:
+async def test_adresse_invalide_refusee(session: AsyncSession) -> None:
     with pytest.raises(AdresseInvalide):
         await comptes.connecter_ou_inscrire(session, adresse="pas-une-adresse")
-    with pytest.raises(NumeroInvalide):
-        await comptes.connecter_ou_inscrire(
-            session, adresse=ADRESSE, telephone_saisi="+33612345678", nom_complet="Fatou"
-        )
 
 
 @pytest.mark.integration
-async def test_liaison_telegram_retrouve_le_compte(session: AsyncSession) -> None:
-    """Le cœur du §9 : pas de doublon entre le web et Telegram."""
-    cree = await comptes.connecter_ou_inscrire(
-        session, adresse=ADRESSE, telephone_saisi=TEL, nom_complet="Fatou"
+async def test_definir_telephone_pose_le_numero(session: AsyncSession) -> None:
+    u = await comptes.connecter_ou_inscrire(session, adresse=ADRESSE, nom_complet="Fatou")
+    await session.commit()
+    assert u.phone is None
+
+    maj = await comptes.definir_telephone(session, utilisateur=u, telephone_saisi="77 123 45 67")
+    await session.commit()
+    assert maj.id == u.id
+    assert maj.phone == TEL  # normalisé en E.164
+
+
+@pytest.mark.integration
+async def test_definir_telephone_deja_utilise_par_un_autre_compte(session: AsyncSession) -> None:
+    proprietaire = await comptes.connecter_ou_inscrire(
+        session, adresse=ADRESSE, nom_complet="Fatou"
+    )
+    autre = await comptes.connecter_ou_inscrire(
+        session, adresse="autre@jobbot-test.sn", nom_complet="Autre"
     )
     await session.commit()
-    lie = await comptes.lier_telegram(session, telephone_saisi="77 123 45 67", telegram_id=555)
+    await comptes.definir_telephone(session, utilisateur=proprietaire, telephone_saisi=TEL)
+    await session.commit()
+
+    with pytest.raises(TelephoneDejaUtilise):
+        await comptes.definir_telephone(session, utilisateur=autre, telephone_saisi=TEL)
+
+
+@pytest.mark.integration
+async def test_definir_telephone_reste_idempotent_sur_le_meme_compte(
+    session: AsyncSession,
+) -> None:
+    """Reposer sur soi-même le numéro qu'on porte déjà doit passer : ce n'est
+    pas « un autre compte » qui le porte."""
+    u = await comptes.connecter_ou_inscrire(session, adresse=ADRESSE, nom_complet="Fatou")
+    await session.commit()
+    await comptes.definir_telephone(session, utilisateur=u, telephone_saisi=TEL)
+    await session.commit()
+
+    encore = await comptes.definir_telephone(session, utilisateur=u, telephone_saisi=TEL)
+    assert encore.phone == TEL
+
+
+@pytest.mark.integration
+async def test_definir_telephone_numero_invalide_refuse(session: AsyncSession) -> None:
+    u = await comptes.connecter_ou_inscrire(session, adresse=ADRESSE, nom_complet="Fatou")
+    await session.commit()
+    with pytest.raises(NumeroInvalide):
+        await comptes.definir_telephone(session, utilisateur=u, telephone_saisi="+33612345678")
+
+
+@pytest.mark.integration
+async def test_liaison_telegram_attache_l_utilisateur_fourni(session: AsyncSession) -> None:
+    """Le cœur du §9 depuis le 2026-09-12 : `lier_telegram` ne recherche plus
+    aucun compte par numéro, c'est l'appelant qui fournit `utilisateur` déjà
+    identifié."""
+    cree = await comptes.connecter_ou_inscrire(session, adresse=ADRESSE, nom_complet="Fatou")
+    await session.commit()
+
+    lie = await comptes.lier_telegram(session, utilisateur=cree, telegram_id=555)
     await session.commit()
     assert lie.id == cree.id
     assert lie.telegram_id == 555
 
 
 @pytest.mark.integration
-async def test_liaison_d_un_numero_inconnu(session: AsyncSession) -> None:
-    with pytest.raises(CompteInexistant):
-        await comptes.lier_telegram(session, telephone_saisi="+221770000000", telegram_id=555)
-
-
-@pytest.mark.integration
 async def test_liaison_idempotente(session: AsyncSession) -> None:
-    await comptes.connecter_ou_inscrire(
-        session, adresse=ADRESSE, telephone_saisi=TEL, nom_complet="Fatou"
-    )
+    u = await comptes.connecter_ou_inscrire(session, adresse=ADRESSE, nom_complet="Fatou")
     await session.commit()
-    await comptes.lier_telegram(session, telephone_saisi=TEL, telegram_id=555)
+    await comptes.lier_telegram(session, utilisateur=u, telegram_id=555)
     await session.commit()
-    encore = await comptes.lier_telegram(session, telephone_saisi=TEL, telegram_id=555)
+    encore = await comptes.lier_telegram(session, utilisateur=u, telegram_id=555)
     assert encore.telegram_id == 555
 
 
 @pytest.mark.integration
-async def test_revocation_incremente_la_version(session: AsyncSession) -> None:
-    u = await comptes.connecter_ou_inscrire(
-        session, adresse=ADRESSE, telephone_saisi=TEL, nom_complet="Fatou"
+async def test_liaison_telegram_deja_rattache_a_un_autre_compte(session: AsyncSession) -> None:
+    premier = await comptes.connecter_ou_inscrire(session, adresse=ADRESSE, nom_complet="Fatou")
+    second = await comptes.connecter_ou_inscrire(
+        session, adresse="autre@jobbot-test.sn", nom_complet="Autre"
     )
+    await session.commit()
+    await comptes.lier_telegram(session, utilisateur=premier, telegram_id=555)
+    await session.commit()
+
+    with pytest.raises(TelegramDejaLie):
+        await comptes.lier_telegram(session, utilisateur=second, telegram_id=555)
+
+
+@pytest.mark.integration
+async def test_revocation_incremente_la_version(session: AsyncSession) -> None:
+    u = await comptes.connecter_ou_inscrire(session, adresse=ADRESSE, nom_complet="Fatou")
     await session.commit()
     await comptes.revoquer_jetons(session, u)
     await session.commit()
@@ -178,7 +238,6 @@ async def test_nom_de_type_inattendu_leve_nom_invalide(
         await comptes.connecter_ou_inscrire(
             session,
             adresse=ADRESSE,
-            telephone_saisi=TEL,
             nom_complet=nom_invalide,  # type: ignore[arg-type]
         )
 
@@ -187,9 +246,7 @@ async def test_nom_de_type_inattendu_leve_nom_invalide(
 async def test_nom_trop_long_refuse_sans_creer_de_ligne(session: AsyncSession) -> None:
     """256 caractères : au-delà de la colonne `users.full_name` (String(255))."""
     with pytest.raises(NomInvalide):
-        await comptes.connecter_ou_inscrire(
-            session, adresse=ADRESSE, telephone_saisi=TEL, nom_complet="A" * 256
-        )
+        await comptes.connecter_ou_inscrire(session, adresse=ADRESSE, nom_complet="A" * 256)
     await session.commit()
     assert await comptes.par_adresse(session, ADRESSE) is None
 
@@ -197,26 +254,8 @@ async def test_nom_trop_long_refuse_sans_creer_de_ligne(session: AsyncSession) -
 @pytest.mark.integration
 async def test_nom_de_longueur_maximale_accepte(session: AsyncSession) -> None:
     """255 caractères exactement : la borne, pas au-delà."""
-    u = await comptes.connecter_ou_inscrire(
-        session, adresse=ADRESSE, telephone_saisi=TEL, nom_complet="A" * 255
-    )
+    u = await comptes.connecter_ou_inscrire(session, adresse=ADRESSE, nom_complet="A" * 255)
     assert u.full_name == "A" * 255
-
-
-@pytest.mark.integration
-async def test_liaison_telegram_deja_rattache_a_un_autre_compte(session: AsyncSession) -> None:
-    autre_tel = "+221779999998"
-    await comptes.connecter_ou_inscrire(
-        session, adresse=ADRESSE, telephone_saisi=TEL, nom_complet="Fatou"
-    )
-    await comptes.connecter_ou_inscrire(
-        session, adresse="autre@jobbot-test.sn", telephone_saisi=autre_tel, nom_complet="Autre"
-    )
-    await session.commit()
-    await comptes.lier_telegram(session, telephone_saisi=TEL, telegram_id=555)
-    await session.commit()
-    with pytest.raises(TelegramDejaLie):
-        await comptes.lier_telegram(session, telephone_saisi=autre_tel, telegram_id=555)
 
 
 @pytest.mark.integration
@@ -226,9 +265,7 @@ async def test_course_a_l_inscription_traduite(
     """Double clic sur « Valider » sur une connexion instable (§11) : la
     deuxième requête doit retrouver le compte, jamais laisser fuir
     l'IntegrityError de la contrainte d'unicité sur `email`."""
-    cree = await comptes.connecter_ou_inscrire(
-        session, adresse=ADRESSE, telephone_saisi=TEL, nom_complet="Fatou"
-    )
+    cree = await comptes.connecter_ou_inscrire(session, adresse=ADRESSE, nom_complet="Fatou")
     await session.commit()
 
     original_par_adresse = comptes.par_adresse
@@ -244,10 +281,5 @@ async def test_course_a_l_inscription_traduite(
 
     monkeypatch.setattr(comptes, "par_adresse", par_adresse_en_retard)
 
-    # Numéro différent pour isoler la collision sur `email` de celle sur
-    # `phone` (déjà couverte par `test_telephone_deja_pris_par_un_autre_compte`).
-    retrouve = await comptes.connecter_ou_inscrire(
-        session, adresse=ADRESSE, telephone_saisi="+221779999997", nom_complet="Fatou"
-    )
+    retrouve = await comptes.connecter_ou_inscrire(session, adresse=ADRESSE, nom_complet="Fatou")
     assert retrouve.id == cree.id
-    assert retrouve.phone == TEL  # le numéro d'origine n'a pas été écrasé

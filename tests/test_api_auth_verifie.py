@@ -1,5 +1,10 @@
 """POST /auth/code/verifie (spec Phase 2 §8).
 
+Depuis le 2026-09-12 (tâche 18), cet endpoint ne prend plus de téléphone :
+le code à 6 chiffres ne prouve que la possession de l'adresse email, jamais
+celle d'un numéro saisi au clavier. `telephone` a disparu de `VerificationCode`
+et `Utilisateur.telephone` peut désormais valoir `None`.
+
 Lancer avec : RUN_INTEGRATION_TESTS=1 pytest -m integration
 
 Les fixtures `client_auth` / `fournisseur_courriel_espion` et le helper
@@ -17,7 +22,6 @@ from src.core.auth import cles, jetons
 from tests.conftest import FournisseurCourrielEspion, demander_code_verification
 
 ADRESSE = "fatou@jobbot-test.sn"
-TEL = "+221771234567"
 
 
 def _code(client: TestClient, espion: FournisseurCourrielEspion, adresse: str = ADRESSE) -> str:
@@ -46,15 +50,37 @@ def test_inscription_complete(
     code = _code(client_auth, fournisseur_courriel_espion)
     r = client_auth.post(
         "/auth/code/verifie",
-        json={"email": ADRESSE, "code": code, "telephone": "77 123 45 67",
-              "nom_complet": "Fatou Diop"},
+        json={"email": ADRESSE, "code": code, "nom_complet": "Fatou Diop"},
     )
     assert r.status_code == 200
     corps = r.json()
     assert corps["email"] == ADRESSE
-    assert corps["telephone"] == TEL
+    assert corps["telephone"] is None  # plus jamais collecté à l'inscription
     assert corps["telegram_lie"] is False
     assert get_settings().cookie_session_nom in r.cookies
+
+
+@pytest.mark.integration
+def test_telephone_dans_le_corps_est_ignore(
+    client_auth: TestClient, fournisseur_courriel_espion: FournisseurCourrielEspion
+) -> None:
+    """La propriété qui remplace l'ancien couple numero_invalide/telephone_deja_
+    utilise à cet endpoint : `VerificationCode` n'a plus de champ `telephone`,
+    donc un client qui en envoie un quand même (ancien client web pas encore
+    mis à jour, requête forgée) ne pose AUCUN numéro — pydantic l'ignore
+    silencieusement, il n'atteint jamais `connecter_ou_inscrire`."""
+    code = _code(client_auth, fournisseur_courriel_espion)
+    r = client_auth.post(
+        "/auth/code/verifie",
+        json={
+            "email": ADRESSE,
+            "code": code,
+            "telephone": "pas un numero du tout",
+            "nom_complet": "Fatou Diop",
+        },
+    )
+    assert r.status_code == 200
+    assert r.json()["telephone"] is None
 
 
 @pytest.mark.integration
@@ -65,7 +91,7 @@ def test_le_cookie_est_httponly(
     code = _code(client_auth, fournisseur_courriel_espion)
     r = client_auth.post(
         "/auth/code/verifie",
-        json={"email": ADRESSE, "code": code, "telephone": TEL, "nom_complet": "Fatou"},
+        json={"email": ADRESSE, "code": code, "nom_complet": "Fatou"},
     )
     entete = r.headers["set-cookie"].lower()
     assert "httponly" in entete
@@ -79,7 +105,7 @@ def test_le_jeton_porte_le_compte(
     code = _code(client_auth, fournisseur_courriel_espion)
     r = client_auth.post(
         "/auth/code/verifie",
-        json={"email": ADRESSE, "code": code, "telephone": TEL, "nom_complet": "Fatou"},
+        json={"email": ADRESSE, "code": code, "nom_complet": "Fatou"},
     )
     jeton = r.cookies[get_settings().cookie_session_nom]
     # Décodé avec la clé DÉRIVÉE, jamais le secret brut (amendement 1, tâche 13) :
@@ -91,7 +117,7 @@ def test_le_jeton_porte_le_compte(
 
 
 @pytest.mark.integration
-def test_compte_nouveau_sans_telephone(
+def test_compte_nouveau_sans_nom(
     client_auth: TestClient, fournisseur_courriel_espion: FournisseurCourrielEspion
 ) -> None:
     code = _code(client_auth, fournisseur_courriel_espion)
@@ -109,81 +135,53 @@ def test_le_code_survit_a_une_inscription_incomplete(
     client_auth.post("/auth/code/verifie", json={"email": ADRESSE, "code": code})
     r = client_auth.post(
         "/auth/code/verifie",
-        json={"email": ADRESSE, "code": code, "telephone": TEL, "nom_complet": "Fatou"},
+        json={"email": ADRESSE, "code": code, "nom_complet": "Fatou"},
     )
     assert r.status_code == 200
     assert len(fournisseur_courriel_espion.envois) == 1  # aucun second email
 
 
 @pytest.mark.integration
-def test_le_code_survit_a_un_numero_invalide(
+def test_deux_inscriptions_independantes_sans_telephone(
     client_auth: TestClient, fournisseur_courriel_espion: FournisseurCourrielEspion
 ) -> None:
-    """Important 3 (revue finale) : une faute de frappe dans le numéro est
-    l'erreur la plus banale du parcours (§11). Elle ne doit pas obliger
-    l'utilisateur à redemander un email, comme `InscriptionIncomplete`."""
-    code = _code(client_auth, fournisseur_courriel_espion)
-    r = client_auth.post(
-        "/auth/code/verifie",
-        json={"email": ADRESSE, "code": code, "telephone": "pas un numero",
-              "nom_complet": "Fatou Diop"},
-    )
-    assert r.status_code == 422
-    assert r.json()["erreur"] == "numero_invalide"
-    # Le même code, corrigé, doit encore fonctionner.
-    r = client_auth.post(
-        "/auth/code/verifie",
-        json={"email": ADRESSE, "code": code, "telephone": TEL, "nom_complet": "Fatou Diop"},
-    )
-    assert r.status_code == 200
-    assert len(fournisseur_courriel_espion.envois) == 1  # aucun second email
-
-
-@pytest.mark.integration
-def test_le_code_survit_a_un_telephone_deja_utilise(
-    client_auth: TestClient, fournisseur_courriel_espion: FournisseurCourrielEspion
-) -> None:
-    """Idem pour `TelephoneDejaUtilise` : deux comptes ne partagent jamais un
-    numéro (§5), mais la victime de cette collision doit pouvoir corriger
-    sans redemander un email."""
+    """La propriété qui remplace l'ancien `test_le_code_survit_a_un_telephone_
+    deja_utilise` : deux comptes différents peuvent s'inscrire l'un après
+    l'autre sans jamais entrer en collision sur un numéro, puisqu'aucun des
+    deux n'en fournit — `phone` reste NULL pour les deux (index unique
+    tolérant plusieurs NULL, migration 0004)."""
     autre_adresse = "autre@jobbot-test.sn"
     autre_code = _code(client_auth, fournisseur_courriel_espion, autre_adresse)
-    r = client_auth.post(
+    r1 = client_auth.post(
         "/auth/code/verifie",
-        json={"email": autre_adresse, "code": autre_code, "telephone": TEL,
-              "nom_complet": "Premier Compte"},
+        json={"email": autre_adresse, "code": autre_code, "nom_complet": "Premier Compte"},
     )
-    assert r.status_code == 200
+    assert r1.status_code == 200
+    assert r1.json()["telephone"] is None
 
     code = _code(client_auth, fournisseur_courriel_espion)
-    r = client_auth.post(
+    r2 = client_auth.post(
         "/auth/code/verifie",
-        json={"email": ADRESSE, "code": code, "telephone": TEL, "nom_complet": "Fatou Diop"},
+        json={"email": ADRESSE, "code": code, "nom_complet": "Fatou Diop"},
     )
-    assert r.status_code == 409
-    assert r.json()["erreur"] == "telephone_deja_utilise"
-    # Le même code, avec un numéro différent, doit encore fonctionner.
-    r = client_auth.post(
-        "/auth/code/verifie",
-        json={"email": ADRESSE, "code": code, "telephone": "+221781234567",
-              "nom_complet": "Fatou Diop"},
-    )
-    assert r.status_code == 200
+    assert r2.status_code == 200
+    assert r2.json()["telephone"] is None
+    assert r2.json()["id"] != r1.json()["id"]
 
 
 @pytest.mark.integration
-def test_reconnexion_sans_ressaisir(
+def test_reconnexion_sans_ressaisir_le_nom(
     client_auth: TestClient, fournisseur_courriel_espion: FournisseurCourrielEspion
 ) -> None:
     code = _code(client_auth, fournisseur_courriel_espion)
     client_auth.post(
         "/auth/code/verifie",
-        json={"email": ADRESSE, "code": code, "telephone": TEL, "nom_complet": "Fatou"},
+        json={"email": ADRESSE, "code": code, "nom_complet": "Fatou"},
     )
     code2 = _code(client_auth, fournisseur_courriel_espion)
     r = client_auth.post("/auth/code/verifie", json={"email": ADRESSE, "code": code2})
     assert r.status_code == 200
-    assert r.json()["telephone"] == TEL
+    assert r.json()["telephone"] is None
 
 
 @pytest.mark.integration
@@ -193,7 +191,7 @@ def test_mauvais_code(
     _code(client_auth, fournisseur_courriel_espion)
     r = client_auth.post(
         "/auth/code/verifie",
-        json={"email": ADRESSE, "code": "000000", "telephone": TEL, "nom_complet": "F"},
+        json={"email": ADRESSE, "code": "000000", "nom_complet": "F"},
     )
     assert r.status_code == 400
     assert r.json()["erreur"] == "code_invalide"
@@ -203,7 +201,7 @@ def test_mauvais_code(
 def test_code_jamais_demande(client_auth: TestClient) -> None:
     r = client_auth.post(
         "/auth/code/verifie",
-        json={"email": ADRESSE, "code": "123456", "telephone": TEL, "nom_complet": "F"},
+        json={"email": ADRESSE, "code": "123456", "nom_complet": "F"},
     )
     assert r.status_code == 400
     assert r.json()["erreur"] == "code_expire"
@@ -216,7 +214,7 @@ def test_code_a_usage_unique(
     code = _code(client_auth, fournisseur_courriel_espion)
     client_auth.post(
         "/auth/code/verifie",
-        json={"email": ADRESSE, "code": code, "telephone": TEL, "nom_complet": "Fatou"},
+        json={"email": ADRESSE, "code": code, "nom_complet": "Fatou"},
     )
     r = client_auth.post("/auth/code/verifie", json={"email": ADRESSE, "code": code})
     assert r.status_code == 400
@@ -236,14 +234,10 @@ def test_plafond_verifications_par_adresse(
     plafond = get_settings().auth_verifications_par_heure
     for _ in range(plafond):
         _code(client_auth, fournisseur_courriel_espion)
-        r = client_auth.post(
-            "/auth/code/verifie", json={"email": ADRESSE, "code": "000000", "telephone": TEL}
-        )
+        r = client_auth.post("/auth/code/verifie", json={"email": ADRESSE, "code": "000000"})
         assert r.json()["erreur"] == "code_invalide"
     _code(client_auth, fournisseur_courriel_espion)
-    r = client_auth.post(
-        "/auth/code/verifie", json={"email": ADRESSE, "code": "000000", "telephone": TEL}
-    )
+    r = client_auth.post("/auth/code/verifie", json={"email": ADRESSE, "code": "000000"})
     assert r.status_code == 429
 
 
@@ -257,9 +251,7 @@ def test_code_expire_ne_consomme_pas_le_plafond_par_adresse(
     connexions de son propriétaire pendant une heure."""
     plafond = get_settings().auth_verifications_par_heure
     for _ in range(plafond):
-        r = client_auth.post(
-            "/auth/code/verifie", json={"email": ADRESSE, "code": "000000", "telephone": TEL}
-        )
+        r = client_auth.post("/auth/code/verifie", json={"email": ADRESSE, "code": "000000"})
         assert r.status_code == 400
         assert r.json()["erreur"] == "code_expire"
     # La victime peut toujours vérifier son propre code après coup : son
@@ -267,7 +259,7 @@ def test_code_expire_ne_consomme_pas_le_plafond_par_adresse(
     code = _code(client_auth, fournisseur_courriel_espion)
     r = client_auth.post(
         "/auth/code/verifie",
-        json={"email": ADRESSE, "code": code, "telephone": TEL, "nom_complet": "Fatou"},
+        json={"email": ADRESSE, "code": code, "nom_complet": "Fatou"},
     )
     assert r.status_code == 200
 
@@ -283,11 +275,11 @@ def test_plafond_verifications_par_ip(
     for i in range(plafond):
         client_auth.post(
             "/auth/code/verifie",
-            json={"email": f"cible{i}@jobbot-test.sn", "code": "000000", "telephone": TEL},
+            json={"email": f"cible{i}@jobbot-test.sn", "code": "000000"},
         )
     r = client_auth.post(
         "/auth/code/verifie",
-        json={"email": "derniere@jobbot-test.sn", "code": "000000", "telephone": TEL},
+        json={"email": "derniere@jobbot-test.sn", "code": "000000"},
     )
     assert r.status_code == 429
 
@@ -299,11 +291,9 @@ def test_verifications_legitimes_sous_le_plafond_passent(
     """Un utilisateur légitime qui se trompe une ou deux fois avant de réussir
     ne doit jamais être bloqué par ce plafond."""
     code = _code(client_auth, fournisseur_courriel_espion)
-    client_auth.post(
-        "/auth/code/verifie", json={"email": ADRESSE, "code": "000000", "telephone": TEL}
-    )
+    client_auth.post("/auth/code/verifie", json={"email": ADRESSE, "code": "000000"})
     r = client_auth.post(
         "/auth/code/verifie",
-        json={"email": ADRESSE, "code": code, "telephone": TEL, "nom_complet": "Fatou"},
+        json={"email": ADRESSE, "code": code, "nom_complet": "Fatou"},
     )
     assert r.status_code == 200

@@ -21,7 +21,6 @@ from src.core.auth import cles
 from tests.conftest import FauxCache, FournisseurCourrielEspion, demander_code_verification
 
 ADRESSE = "fatou@jobbot-test.sn"
-TEL = "+221771234567"
 
 
 def _code(client: TestClient, espion: FournisseurCourrielEspion, adresse: str = ADRESSE) -> str:
@@ -77,7 +76,7 @@ def _connecter(
     code = _code(client, espion, adresse)
     client.post(
         "/auth/code/verifie",
-        json={"email": adresse, "code": code, "telephone": TEL, "nom_complet": "Fatou"},
+        json={"email": adresse, "code": code, "nom_complet": "Fatou"},
     )
 
 
@@ -95,7 +94,7 @@ def test_moi_avec_cookie(
     code = _code(client_auth, fournisseur_courriel_espion)
     client_auth.post(
         "/auth/code/verifie",
-        json={"email": ADRESSE, "code": code, "telephone": TEL, "nom_complet": "Fatou"},
+        json={"email": ADRESSE, "code": code, "nom_complet": "Fatou"},
     )
     r = client_auth.get("/moi")
     assert r.status_code == 200
@@ -109,7 +108,7 @@ def test_jeton_bricole_refuse(
     code = _code(client_auth, fournisseur_courriel_espion)
     client_auth.post(
         "/auth/code/verifie",
-        json={"email": ADRESSE, "code": code, "telephone": TEL, "nom_complet": "Fatou"},
+        json={"email": ADRESSE, "code": code, "nom_complet": "Fatou"},
     )
     client_auth.cookies.set(get_settings().cookie_session_nom, "pas.un.jeton")
     assert client_auth.get("/moi").status_code == 401
@@ -123,7 +122,7 @@ def test_deconnexion_invalide_le_jeton(
     code = _code(client_auth, fournisseur_courriel_espion)
     r = client_auth.post(
         "/auth/code/verifie",
-        json={"email": ADRESSE, "code": code, "telephone": TEL, "nom_complet": "Fatou"},
+        json={"email": ADRESSE, "code": code, "nom_complet": "Fatou"},
     )
     jeton = r.cookies[get_settings().cookie_session_nom]
     assert client_auth.post("/auth/deconnexion").status_code == 204
@@ -144,7 +143,7 @@ def test_jeton_de_liaison_telegram(
     code = _code(client_auth, fournisseur_courriel_espion)
     client_auth.post(
         "/auth/code/verifie",
-        json={"email": ADRESSE, "code": code, "telephone": TEL, "nom_complet": "Fatou"},
+        json={"email": ADRESSE, "code": code, "nom_complet": "Fatou"},
     )
     r = client_auth.post("/moi/telegram/jeton")
     assert r.status_code == 200
