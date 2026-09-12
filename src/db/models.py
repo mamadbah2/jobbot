@@ -64,20 +64,11 @@ class User(TimestampMixin, Base):
     __table_args__ = (_check_in("state", USER_STATES, "ck_users_state"),)
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    # Identité de connexion depuis le 2026-09-11 (CLAUDE.md §5). Avant cette date
-    # c'était `telegram_id`, quand Telegram était l'unique interface.
+    # Identité de connexion, et la seule, depuis le 2026-09-12 (CLAUDE.md §5).
+    # Avant le 2026-09-11 c'était `telegram_id` ; `phone` a été retiré par la
+    # migration 0005 (un numéro saisi au clavier n'est prouvé par rien, et sa
+    # contrainte d'unicité permettait de réserver celui d'autrui).
     email: Mapped[str] = mapped_column(String(320), unique=True, nullable=False, index=True)
-    # Nullable depuis le 2026-09-12 : un numéro saisi au clavier à l'inscription
-    # n'est jamais prouvé (le code à 6 chiffres ne prouve que la possession de
-    # l'adresse email), et permettait à un attaquant de squatter le numéro
-    # d'autrui — voir la migration 0004. Il n'est désormais renseigné que par
-    # un canal qui le certifie lui-même : la liaison Telegram (bouton natif
-    # « partager mon contact ») ou, plus tard, le webhook mobile money (§10).
-    # Comme `telegram_id`, un index unique tolère plusieurs NULL en Postgres.
-    phone: Mapped[str | None] = mapped_column(String(32), unique=True, index=True)
-    # Nullable : un utilisateur venu du web n'a pas encore lié Telegram.
-    # En Postgres, un index unique tolère plusieurs NULL.
-    telegram_id: Mapped[int | None] = mapped_column(BigInteger, unique=True, index=True)
     full_name: Mapped[str | None] = mapped_column(String(255))
     # Incrémentée pour invalider d'un coup tous les jetons émis (§5).
     # `server_default` en plus du défaut Python : sans lui, un INSERT hors

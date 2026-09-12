@@ -31,9 +31,7 @@ class Utilisateur(BaseModel):
 
     id: int
     email: str
-    telephone: str | None
     nom_complet: str | None
-    telegram_lie: bool
     etat: str
 
     @classmethod
@@ -44,8 +42,6 @@ class Utilisateur(BaseModel):
         return cls(
             id=utilisateur.id,
             email=utilisateur.email,
-            telephone=utilisateur.phone,
             nom_complet=utilisateur.full_name,
-            telegram_lie=utilisateur.telegram_id is not None,
             etat=utilisateur.state,
         )
