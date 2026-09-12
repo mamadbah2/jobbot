@@ -244,8 +244,8 @@ def test_l_endpoint_de_liaison_telegram_n_existe_plus(client_auth: TestClient) -
 
 - [ ] **Step 2 : lancer les tests pour vérifier qu'ils échouent**
 
-Run: `.venv/bin/python -m pytest tests/test_retrait_telegram_telephone.py -v && RUN_INTEGRATION_TESTS=1 .venv/bin/python -m pytest "tests/test_api_moi.py::test_l_endpoint_de_liaison_telegram_n_existe_plus" -v`
-Expected: `test_l_usage_de_cle_liaison_n_existe_plus` ÉCHOUE (`"liaison"` est dans `get_args`), `test_aucun_reglage_de_liaison_telegram` ÉCHOUE, et le test d'intégration ÉCHOUE avec `assert 200 == 404`.
+Run: `.venv/bin/python -m pytest tests/test_retrait_telegram_telephone.py -v && RUN_INTEGRATION_TESTS=1 .venv/bin/python -m pytest -m integration "tests/test_api_moi.py::test_l_endpoint_de_liaison_telegram_n_existe_plus" -v`
+Expected: `test_l_usage_de_cle_liaison_n_existe_plus` ÉCHOUE (`"liaison"` est dans `get_args`), `test_aucun_reglage_de_liaison_telegram` ÉCHOUE, et le test d'intégration ÉCHOUE avec `assert 401 == 404` — 401 et non 200, parce que la route existe encore et exige une session ; c'est précisément ce que le test doit distinguer d'un 404.
 
 - [ ] **Step 3 : réécrire `src/api/routers/moi.py`**
 
@@ -329,7 +329,7 @@ Conserver la classe espionne d'alertes si elle sert encore à d'autres tests du 
 - [ ] **Step 8 : lancer la suite complète**
 
 Run: `.venv/bin/python -m pytest -q && RUN_INTEGRATION_TESTS=1 .venv/bin/python -m pytest -m integration -q`
-Expected: tout vert, zéro avertissement. Le compte de tests unitaires baisse (six tests de liaison retirés, deux gardes ajoutées).
+Expected: tout vert, zéro avertissement. Le compte unitaire MONTE de deux (les deux gardes) : les six tests de liaison retirés étaient tous marqués `integration`, c'est donc le compte d'intégration qui baisse.
 
 - [ ] **Step 9 : vérifier ruff et mypy**
 
@@ -655,7 +655,9 @@ Dans `tests/test_api_auth_verifie.py`, remplacer les assertions `corps["telephon
 
 - [ ] **Step 2 : lancer les tests pour vérifier qu'ils échouent**
 
-Run: `RUN_INTEGRATION_TESTS=1 .venv/bin/python -m pytest tests/test_identite_migration.py -v`
+Run: `RUN_INTEGRATION_TESTS=1 .venv/bin/python -m pytest -m integration tests/test_identite_migration.py -v`
+
+**`-m integration` est obligatoire**, et pas seulement la variable d'environnement : `pyproject.toml` porte `addopts = "-m 'not integration'"`, qui dé-sélectionne ces tests par défaut. Sans le marqueur explicite, la commande ne collecte RIEN et paraît réussir — défaut rencontré pour de vrai en Tâche 2.
 Expected: `test_les_colonnes_telephone_et_telegram_ont_disparu` ÉCHOUE (`phone` est encore là), `test_le_modele_n_expose_plus_ces_champs` ÉCHOUE.
 
 - [ ] **Step 3 : écrire la migration 0005**
