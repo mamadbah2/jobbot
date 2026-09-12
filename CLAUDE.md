@@ -26,7 +26,7 @@ Ces points ont été tranchés par le porteur du projet. Ne les remets pas en qu
 | Architecture = **couche métier + API**, plusieurs clients | Figé le 2026-09-11 |
 | Client unique = **web (Next.js, PWA)** | Figé le 2026-09-12 — révise « premier client = web ; Telegram remis à niveau ensuite » (2026-09-11). Le retrait de Telegram est **sans retour** : le code du bot est supprimé, pas débranché |
 | Mobile = **PWA** issue du même code web, pas d'application native | Figé le 2026-09-11 |
-| Authentification = **email + code à 6 chiffres**, l'adresse est la seule identité de connexion — **aucun numéro de téléphone** | Figé le 2026-09-12 — le téléphone était obligatoire (2026-09-11), puis facultatif (2026-09-12, matinée) ; la colonne est supprimée, cf. §5 |
+| Authentification = **email + code à 6 chiffres**, l'adresse est la seule identité de connexion — **aucun numéro de téléphone** | Figé le 2026-09-12 — le téléphone était obligatoire (2026-09-11), puis facultatif (2026-09-12) ; la colonne est supprimée, cf. §5 |
 | Hébergement = **tout sur le VPS**, `web` et `api` sur la même origine | Figé le 2026-09-11 |
 | LLM = **DeepSeek** (API compatible OpenAI) | Figé |
 | Monétisation = **abonnement mensuel** (pas de packs) | Figé |
@@ -303,6 +303,9 @@ Le quota de 25 est un **plafond de coût**, pas une limite arbitraire. Il doit �
 3. Choix des secteurs + région + type de contrat (boutons, pas de saisie libre)
 4. Première alerte envoyée immédiatement — **la valeur doit être visible avant toute demande de paiement**
 
+> **Par quel canal ?** Les alertes offres partaient par Telegram jusqu'au 2026-09-12 ; leur canal
+> de remplacement **n'est pas tranché** (§14.9). L'exigence ne bouge pas, le moyen est ouvert.
+
 Le parcours n'existe que sur le web. L'étape 1 demande **deux champs au lieu de trois** depuis le
 2026-09-12 : c'est autant de repris sur la contrainte du §11, où chaque étape supplémentaire coûte
 des abandons.
@@ -342,9 +345,12 @@ Si un scraper renvoie 0 offre alors qu'il en renvoyait > 0 la veille → log niv
 > était le log, son rayon d'exposition était un fichier sur notre machine. `AlerteCourriel` recopie
 > **tout le contexte reçu** dans le corps du message, qui part par le réseau chez un fournisseur
 > transactionnel. Les appels existants ont été relus le 2026-09-12 : ils ne transportent que des
-> noms de source, des compteurs et le domaine d'une adresse — aucun code de vérification, aucun
-> jeton, aucune adresse d'utilisateur. **Règle pour la suite : tout nouvel appel à `.envoyer()`
-> doit justifier ce qu'il met dans son contexte.** Un code de vérification qui y passerait
+> noms de source, des compteurs, le domaine d'une adresse (jamais l'adresse entière) et
+> `erreur=str(exc)` — aucun code de vérification, aucun jeton, aucune adresse d'utilisateur.
+> **`erreur=str(exc)` est le champ à surveiller** : c'est la seule chaîne **libre** des contextes,
+> donc le seul qui puisse emporter n'importe quoi le jour où l'exception change. **Règle pour la
+> suite : tout nouvel appel à `.envoyer()` doit justifier ce qu'il met dans son contexte**, et
+> regarder d'abord ses champs libres. Un code de vérification qui y passerait
 > violerait l'interdiction n°2 du §2, qui interdit qu'il sorte de Redis autrement que vers son
 > destinataire — et le violerait sans qu'aucun test de log ne le voie.
 
@@ -468,6 +474,8 @@ par le web.
 
 **Phase 4 — Offres et alertes (3 j.)**
 Matching, liste des offres dans le web, alertes 2x/jour, filtres, désabonnement.
+**Bloquée tant que le §14.9 n'est pas tranché** : le canal des alertes vers l'utilisateur est mort
+avec Telegram le 2026-09-12 et n'a pas de remplaçant. Le critère ci-dessous dépend de ce choix.
 *Validation : un utilisateur test reçoit des offres pertinentes 2 jours de suite.*
 
 **Phase 5 — Génération des documents (1 sem.)**
@@ -481,7 +489,7 @@ Intégration agrégateur, webhook, cycle de vie de l'abonnement, relances, repli
 
 > **La Phase 7 (« Bot Telegram remis au niveau du web ») a été supprimée le 2026-09-12.** La
 > numérotation des phases suivantes est **conservée telle quelle** : elle est citée ailleurs dans
-> le dépôt (`src/alerting.py`, `src/core/alerte.py` renvoient à « §12 Phase 8 »). Un trou dans la
+> le dépôt (`src/alerting.py` renvoie à « CLAUDE.md §7, §12 Phase 8 »). Un trou dans la
 > numérotation coûte moins qu'une renumérotation qui périmerait des commentaires de code.
 
 **Phase 8 — Exploitation (continu)**
@@ -509,7 +517,7 @@ Administration par **commandes CLI sur le VPS** (`docker compose exec api python
 1. Nom de domaine et nom du produit. — **`jobbot` retenu à titre PROVISOIRE le 2026-08-26.** **Redevenu nécessaire le 2026-09-11** avec l'authentification par email : SPF, DKIM et DMARC exigent un domaine possédé, et un sous-domaine gratuit ne convient pas (§7). **Ne bloque pas la Phase 2** — elle se développe et se teste intégralement avec le fournisseur d'envoi « console », et un bac à sable de fournisseur permet même de recevoir de vrais emails sur l'adresse vérifiée du propriétaire du compte. **Bloque l'ouverture à de vrais utilisateurs, donc la Phase 6.** Ordre de grandeur : 7 000 à 8 500 FCFA par an pour un `.com`. — ouvert
 2. Agrégateur mobile money retenu et grille de frais réelle. — ouvert
 3. Statut juridique de la structure (nécessaire pour ouvrir un compte marchand). — ouvert
-4. Politique de confidentialité : les CV sont des données personnelles. Durée de conservation, suppression sur demande, action « supprimer mes données » à prévoir dans le web (c'était une commande Telegram `/supprimer_mes_donnees` jusqu'au 2026-09-12). — ouvert
+4. Politique de confidentialité : les CV sont des données personnelles. Durée de conservation, suppression sur demande, action « supprimer mes données » à prévoir dans le web. Elle n'a jamais été écrite : elle était prévue en commande Telegram `/supprimer_mes_donnees`, et se reporte sur le web depuis le 2026-09-12. — ouvert
 5. Adresse email de l'utilisateur. — **Rouvert et tranché le 2026-09-11** : l'adresse devient l'**identité de connexion**, `users.email` passe `NOT NULL UNIQUE`. Elle ne sert toujours pas de Reply-To, puisque le service n'écrit à aucun recruteur (§2, interdiction n°1).
 
 6. Fournisseur d'envoi d'email transactionnel. — à choisir en même temps que le domaine. — ouvert
@@ -520,6 +528,12 @@ Administration par **commandes CLI sur le VPS** (`docker compose exec api python
    - *Tranché et fait* : les alertes partent par email vers `ADMIN_COURRIEL`, avec repli sur le log du VPS quand il est vide.
    - *Tranché, non fait* : les actions d'exploitation (statistiques d'ingestion, état des scrapers, activation manuelle d'un abonnement) deviennent des commandes CLI sur le VPS. Aucune n'est écrite ; aucune n'a de besoin réel avant la Phase 6.
    - *Non tranché* : **par où passe le repli de paiement manuel côté utilisateur** (§10) ? Une page web qui affiche un numéro Wave et reçoit une capture d'écran est la piste, mais elle demande un écran, un stockage de pièce jointe et une modération — ce n'est pas un effet de bord du retrait de Telegram. À décider avec le porteur du projet avant la Phase 6.
+
+9. **Par quel canal les alertes offres arrivent-elles à l'utilisateur ?** — **Posé le 2026-09-12, non tranché. Bloque la Phase 4.**
+   Le brief promet des alertes **poussées et récurrentes** : `worker_match` « push des alertes » (§4), 5/jour en Free et illimitées en Pro (§6), « première alerte envoyée immédiatement » à l'étape 4 de l'onboarding (§6), 2x/jour en Phase 4 (§12), validées par « un utilisateur test reçoit des offres pertinentes 2 jours de suite ».
+   **Ce canal était Telegram, et il n'a pas été remplacé.** Le seul client est une PWA, et le §7 n'autorise l'email transactionnel que pour la vérification d'adresse et l'alerte admin. L'exigence métier survit — la valeur doit être visible avant toute demande de paiement (§6) — mais **aucun canal ne la porte aujourd'hui**.
+   Options, sans préférence de ma part : notifications push web (gratuites, mais capricieuses sur Android d'entrée de gamme et refusables), **email** d'alerte périodique (fiable, mais c'est un envoi récurrent vers de vrais utilisateurs : coût de délivrabilité, réputation du domaine, désabonnement obligatoire — un tout autre régime que le code de vérification), ou **consultation sans push**, l'utilisateur revenant voir ses offres.
+   C'est un choix produit **et** un coût de délivrabilité : il appartient au porteur du projet. **Ne pas coder la Phase 4 avant qu'il soit tranché** — son critère de validation en dépend directement.
 
 ---
 

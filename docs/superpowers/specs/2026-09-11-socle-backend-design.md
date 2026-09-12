@@ -10,8 +10,14 @@
 > « Téléphone » du §2, le processus `bot` du §4, `phone` et `telegram_id` du §5,
 > `core/telephone.py` du §6, la ligne `/moi/telegram/jeton` et le champ `telephone` du §8, le
 > **§9 en entier** (liaison Telegram), `phonenumbers` du §12, les tests Telegram et téléphone du
-> §13, et les critères de validation du §15 — réécrits au §8 de la spec du 2026-09-12 et repris
-> dans `CLAUDE.md` §12.
+> §13, le point 3 du §16 (le téléphone n'est plus stocké), et les critères de validation du §15 —
+> réécrits au §8 de la spec du 2026-09-12 et repris dans `CLAUDE.md` §12.
+>
+> **Attention particulière au §11 « Client web » : c'est le reste-à-faire de la Phase 2, et la
+> seule liste d'écrans du dépôt.** Sa dernière ligne est caduque sur deux points : il n'y a plus
+> d'**écran de saisie du téléphone** (le formulaire du compte nouveau ne demande que le nom), et
+> plus de **bouton « Connecter Telegram »** sur l'écran de compte. Le reste tient : saisie de
+> l'adresse, saisie du code, saisie du nom, écran de compte — et le plafond de 200 Ko.
 
 ---
 
