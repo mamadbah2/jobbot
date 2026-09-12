@@ -17,7 +17,16 @@
 - **Branche : `worktree-phase2-socle-backend`**, dans le worktree `/home/mamadbah/projects/jobbot/.claude/worktrees/phase2-socle-backend`. Ne jamais travailler depuis le dépôt principal.
 - **L'interpréteur est `.venv/bin/python` du worktree.** Son `.pth` éditable pointe sur le worktree ; utiliser le venv du dépôt principal ferait tester le mauvais code.
 - **La base de développement est PARTAGÉE avec le dépôt principal et porte 232 offres réelles.** Ne jamais exécuter `docker compose down -v`, ni `alembic downgrade`, ni `DROP DATABASE`. Vérifier `select count(*) from jobs` = 232 avant et après toute migration.
-- **`docker compose` ne fonctionne pas depuis le worktree** : `.env` est gitignoré, donc absent ici. Pour lire la base, utiliser `docker exec jobbot-postgres-1 psql -U jobbot -d jobbot -c '…'`. Pour lancer la pile, se placer dans le dépôt principal.
+- **`docker compose` ne fonctionne pas depuis le worktree** : `.env` est gitignoré, donc absent ici.
+  Pour lire la base, utiliser `docker exec jobbot-postgres-1 psql -U jobbot -d jobbot -c '…'`.
+- **Et il ne faut PAS le lancer depuis le dépôt principal non plus.** Celui-ci est sur `main`,
+  qui ne contient ni le retrait ni la migration `0005` : `docker compose` y construirait une
+  image du MAUVAIS code, et son `alembic` ne connaît que la révision `0001`. Ce qu'il faut
+  savoir à la place : Postgres est joignable depuis l'hôte sur `127.0.0.1:55432`, et
+  `alembic`/`pytest` du worktree s'y connectent directement avec `POSTGRES_HOST=127.0.0.1`
+  et `POSTGRES_PORT=55432`. **Redis, lui, n'expose aucun port sur l'hôte** : un processus
+  applicatif lancé depuis l'hôte a besoin de l'IP du conteneur
+  (`docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' jobbot-redis-1`).
 - **État de départ : la branche est ROUGE, pytest ET mypy.** `pytest -q` donne `334 passed, 2 failed` ; `mypy src/` donne `Unexpected keyword argument "telephone_saisi" for "lier_telegram"` à `src/bot/handlers/compte.py:75` (57 fichiers vérifiés). Les deux viennent des commits non poussés qui ont retiré la recherche par numéro de `lier_telegram` sans réaligner son appelant, et les deux disparaissent avec `src/bot/` en Tâche 1. Les deux échecs pytest sont `tests/test_bot_compte.py::test_numero_etranger_normalisation_reelle_ne_touche_pas_la_base[hors_senegal]` et `[invalide_sans_indicatif_senegalais]`. Ne pas chercher à réparer l'un ou l'autre : c'est du travail sur du code condamné.
 - Type hints partout. `mypy --strict` doit passer sur `src/` (`files = ["src"]`).
 - `ruff check src/ tests/` doit passer. Longueur de ligne : 100.
@@ -481,10 +490,15 @@ async def connecter_ou_inscrire(
     except IntegrityError:
         # Course : une requête concurrente a créé le compte entre notre SELECT
         # et notre INSERT. Fréquent quand l'utilisateur tape deux fois sur
-        # « Valider » sur une connexion instable (§11). `email` est désormais la
-        # SEULE contrainte d'unicité de la table : si `deja` reste introuvable,
-        # la cause est autre et inconnue, on laisse l'IntegrityError remonter
-        # plutôt que de la traduire en une erreur métier qui mentirait.
+        # « Valider » sur une connexion instable (§11). La seule contrainte
+        # d'unicité que CET INSERT peut heurter est `email` : il ne pose que
+        # `email`, `full_name` et `state`. Formulation volontairement bornée à
+        # l'INSERT et non à la table — `phone` et `telegram_id` portent encore
+        # un index unique jusqu'à la migration 0005, et une affirmation plus
+        # large serait fausse le temps d'un commit. Si `deja` reste
+        # introuvable, la cause est autre et inconnue : on laisse
+        # l'IntegrityError remonter plutôt que de la traduire en une erreur
+        # métier qui mentirait.
         deja = await par_adresse(session, normalisee)
         if deja is not None:
             return deja
@@ -777,13 +791,26 @@ class Utilisateur(BaseModel):
 docker exec jobbot-postgres-1 psql -U jobbot -d jobbot -c "select count(*) as offres from jobs; select count(*) as users from users;"
 ```
 
-Noter les deux nombres (attendu : 232 et 0). Puis, **depuis le dépôt principal** (`/home/mamadbah/projects/jobbot`, seul endroit où `.env` existe) :
+Noter les deux nombres (attendu : 232 et 0).
+
+**Ne PAS utiliser `docker compose run --rm migrate` depuis le dépôt principal** : celui-ci est sur
+`main`, dont `alembic/versions/` ne contient que `0001`. Il ne verrait pas la révision `a1c2e3f40004`
+de la base et échouerait sans appliquer `0005`. La migration se lance depuis le worktree, qui est le
+seul endroit où `0005` existe, en pointant sur le port exposé par compose :
 
 ```bash
-docker compose run --rm migrate
+export POSTGRES_HOST=127.0.0.1 POSTGRES_PORT=55432 POSTGRES_USER=jobbot \
+       POSTGRES_PASSWORD=jobbot_dev_password POSTGRES_DB=jobbot \
+       TELEGRAM_BOT_TOKEN=1:factice_pour_migration
+.venv/bin/alembic current   # doit afficher a1c2e3f40004
+.venv/bin/alembic heads     # doit afficher a1c2e3f40005 (head)
+.venv/bin/alembic upgrade head
 ```
 
-Puis revenir dans le worktree et vérifier :
+`TELEGRAM_BOT_TOKEN` est encore obligatoire pour construire `Settings` jusqu'à la Tâche 6 : une
+valeur factice suffit, `alembic/env.py` ne lit que `database_url`.
+
+Puis vérifier :
 
 ```bash
 docker exec jobbot-postgres-1 psql -U jobbot -d jobbot -c "select * from alembic_version;" -c "\d users" -c "select count(*) from jobs;"
@@ -1436,14 +1463,23 @@ Expected: `a1c2e3f40005`, **232 offres**, et une table `users` sans `phone` ni `
 
 - [ ] **Step 3 : dérouler le parcours réel, depuis le dépôt principal**
 
-Le worktree n'a pas de `.env` : se placer dans `/home/mamadbah/projects/jobbot`, puis :
+**Le dépôt principal ne peut PAS servir à ça** : il est sur `main`, donc `docker compose up
+--build api` y construirait une image du code AVANT le retrait — le parcours validerait alors
+exactement ce qu'on vient de défaire. Le parcours se déroule depuis le worktree, en lançant l'API
+avec son propre interpréteur contre l'infrastructure de compose :
 
 ```bash
-git -C /home/mamadbah/projects/jobbot stash list   # vérifier qu'on ne perturbe rien
-docker compose up -d --build api
+REDIS_IP=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' jobbot-redis-1)
+export POSTGRES_HOST=127.0.0.1 POSTGRES_PORT=55432 POSTGRES_USER=jobbot \
+       POSTGRES_PASSWORD=jobbot_dev_password POSTGRES_DB=jobbot \
+       REDIS_URL="redis://$REDIS_IP:6379/0" HTTP_PORT=8081
+.venv/bin/python -m src.api.main    # en arrière-plan
 ```
 
-**Ne jamais lancer `docker compose down -v`.** Dérouler ensuite les six étapes du README (§Task 7, Step 2) et consigner les résultats :
+`HTTP_PORT=8081` et non 8080 : le conteneur `api` de compose occupe peut-être déjà 8080, et on ne
+veut ni l'arrêter ni le remplacer. Les `curl` du parcours visent alors `localhost:8081`.
+
+**Ne jamais lancer `docker compose down -v`**, et ne pas reconstruire le service `api` partagé. Dérouler ensuite les six étapes du README (§Task 7, Step 2) et consigner les résultats :
 
 1. inscription complète : `/auth/code/demande` → code lu dans les logs → `/auth/code/verifie` → `/moi` rend `{id, email, nom_complet, etat}` et rien d'autre ;
 2. reconnexion avec la même adresse : **le même `id`**, aucun doublon en base ;
