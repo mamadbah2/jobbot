@@ -7,17 +7,58 @@ modèle économique suppose (décision du 2026-09-13).
 
 from __future__ import annotations
 
-from typing import Annotated
+import asyncio
+from typing import Annotated, cast
 
+import redis.asyncio as aioredis
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy import func, nulls_last, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.api import deps
 from src.api.schemas.offres import Offre, PageOffres
+from src.config import get_settings
 from src.db.models import Job, User
+from src.ingest.fraicheur import CacheRedis
+from src.logging_setup import get_logger
+from src.worker_ingest import rafraichir_a_la_demande
+
+log = get_logger(__name__)
 
 router = APIRouter(tags=["offres"])
+
+# `asyncio` ne retient qu'une référence FAIBLE vers une tâche : sans cet
+# ensemble, le ramasse-miettes peut emporter la passe en plein vol, au hasard.
+_TACHES_DE_FOND: set[asyncio.Task[None]] = set()
+
+
+async def _rafraichir_en_arriere_plan() -> None:
+    """Possède son propre client Redis, et ne le ferme qu'à la toute fin.
+
+    Le client de `deps.cache_redis` est fermé en fin de requête : le passer à
+    une tâche de fond laisserait `liberer_verrou` échouer, et la source
+    resterait verrouillée pendant `ingest_verrou_secondes` (spec §7).
+    """
+    client: aioredis.Redis = aioredis.from_url(
+        get_settings().redis_url, decode_responses=True
+    )
+    planifiees: list[asyncio.Task[None]] = []
+    try:
+        # `cast` : les stubs de `redis-py` déclarent `delete`/`get`/`set` en
+        # retour `T | Awaitable[T]` (client synchrone ET asynchrone confondus),
+        # alors que `CacheRedis` déclare des méthodes `async def`. mypy compare
+        # alors `Awaitable[T]` à `Coroutine[Any, Any, Any]` et refuse — écart de
+        # typage des stubs, pas un vrai défaut de comportement à l'exécution.
+        await rafraichir_a_la_demande(
+            cast(CacheRedis, client),
+            planifier=lambda coro: planifiees.append(asyncio.create_task(coro)),
+        )
+        if planifiees:
+            await asyncio.gather(*planifiees, return_exceptions=True)
+    except Exception as exc:  # noqa: BLE001 — une passe ratée ne casse jamais l'affichage
+        log.error("rafraichissement_depuis_api_echoue", type_erreur=type(exc).__name__)
+    finally:
+        await client.aclose()
 
 
 @router.get("/offres")
@@ -44,4 +85,9 @@ async def lister_offres(
     )
     lignes = (await session.execute(requete)).scalars().all()
     total = (await session.execute(select(func.count()).select_from(Job))).scalar_one()
+
+    tache = asyncio.create_task(_rafraichir_en_arriere_plan())
+    _TACHES_DE_FOND.add(tache)
+    tache.add_done_callback(_TACHES_DE_FOND.discard)
+
     return PageOffres(offres=[Offre.depuis(j) for j in lignes], total=total)

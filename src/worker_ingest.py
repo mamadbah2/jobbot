@@ -11,8 +11,9 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import time
+from collections.abc import Callable, Coroutine
 from dataclasses import asdict, dataclass
-from typing import Final
+from typing import Any, Final
 
 import httpx
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -183,12 +184,20 @@ if __name__ == "__main__":
         asyncio.run(main())
 
 
-async def rafraichir_a_la_demande(cache: CacheRedis) -> dict[str, Decision]:
+async def rafraichir_a_la_demande(
+    cache: CacheRedis,
+    *,
+    planifier: Callable[[Coroutine[Any, Any, None]], Any] = asyncio.create_task,
+) -> dict[str, Decision]:
     """Point d'entrée de l'API : appelé quand un utilisateur ouvre la plateforme.
 
     Ne bloque jamais l'appelant. L'API sert les offres déjà en base, et cette
     fonction déclenche au besoin une passe de fond — au plus une à la fois par
     source, grâce au verrou Redis (§2.4).
+
+    `planifier` est injectable pour que l'appelant sache quand le travail de
+    fond est terminé : l'API doit fermer son client Redis **après**, pas avant
+    (spec du client web §7).
     """
     settings = get_settings()
     decisions: dict[str, Decision] = {}
@@ -210,5 +219,6 @@ async def rafraichir_a_la_demande(cache: CacheRedis) -> dict[str, Decision]:
             fraicheur_secondes=settings.ingest_fraicheur_minutes * 60,
             duree_verrou_secondes=settings.ingest_verrou_secondes,
             executer_passe=passe,
+            planifier=planifier,
         )
     return decisions
