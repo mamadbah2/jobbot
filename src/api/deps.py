@@ -30,8 +30,10 @@ def reglages() -> Settings:
 def alerte(settings: Annotated[Settings, Depends(reglages)]) -> AlerteAdmin:
     """Canal d'alerte admin, injectable par FastAPI.
 
-    Était dupliqué verbatim dans `auth.py` et `moi.py` (revue finale,
-    corrections mineures) : centralisé ici comme `reglages` ci-dessus.
+    Était dupliqué verbatim dans `auth.py` (seul appelant depuis que `moi.py`
+    n'a plus besoin ni de `alerte` ni de `ip_cliente`) (revue finale,
+    corrections mineures) : centralisé ici comme `reglages` ci-dessus, pour
+    qu'un futur second appelant n'ait rien à réécrire.
     """
     return construire_alerte(settings)
 
@@ -43,8 +45,10 @@ def ip_cliente(request: Request) -> str:
     par `ProxyHeadersMiddleware` d'uvicorn selon `PROXY_IPS_DE_CONFIANCE`
     (`src/api/main.py`) : rien de plus à faire ici.
 
-    Dupliqué verbatim dans `auth.py` et `moi.py` (revue finale, corrections
-    mineures) : centralisé ici comme `reglages` ci-dessus.
+    Dupliqué verbatim dans `auth.py` (seul appelant depuis que `moi.py` n'a
+    plus besoin ni de `alerte` ni de `ip_cliente`) (revue finale, corrections
+    mineures) : centralisé ici comme `reglages` ci-dessus, pour qu'un futur
+    second appelant n'ait rien à réécrire.
     """
     return request.client.host if request.client else "inconnue"
 

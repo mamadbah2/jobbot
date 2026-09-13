@@ -15,7 +15,6 @@ from src.core.erreurs import (
     AdresseInvalide,
     CodeExpire,
     CodeInvalide,
-    CompteInexistant,
     EnvoiImpossible,
     ErreurMetier,
     InscriptionIncomplete,
@@ -47,7 +46,6 @@ _STATUTS: dict[type[ErreurMetier], int] = {
     TropDeDemandes: status.HTTP_429_TOO_MANY_REQUESTS,
     PlafondGlobalAtteint: status.HTTP_503_SERVICE_UNAVAILABLE,
     JetonInvalide: status.HTTP_401_UNAUTHORIZED,
-    CompteInexistant: status.HTTP_404_NOT_FOUND,
     EnvoiImpossible: status.HTTP_503_SERVICE_UNAVAILABLE,
     # Explicites depuis que /auth/code/verifie les lève réellement : un choix,
     # pas le défaut 400 par omission (revue finale, corrections mineures).

@@ -118,3 +118,13 @@ def test_aucune_variable_telegram_dans_l_exemple_d_environnement() -> None:
     déploiement : une variable morte y ferait croire qu'il faut la renseigner."""
     contenu = Path(".env.example").read_text(encoding="utf-8")
     assert "TELEGRAM" not in contenu.upper()
+
+
+def test_le_dockerfile_ne_demarre_plus_sur_src_bot() -> None:
+    """`docker compose` ne souffre pas d'un `CMD` périmé : chaque service pose
+    son propre `command:`. Mais un `docker run jobbot` nu, réflexe de débogage
+    sur le VPS, hérite du `CMD` par défaut — et mourrait sur un
+    `ModuleNotFoundError` qui ne dit rien de la vraie cause si ce `CMD`
+    pointait encore vers `src/bot/`, déjà supprimé (test ci-dessus)."""
+    contenu = Path("Dockerfile").read_text(encoding="utf-8")
+    assert "src.bot" not in contenu, "le Dockerfile référence encore src.bot"

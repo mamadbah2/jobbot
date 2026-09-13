@@ -1,7 +1,8 @@
 """`src/core/` ne connaît aucun framework (CLAUDE.md §4).
 
-C'est la condition qui fait de l'API et du bot deux traductions de la même
-règle, et non deux copies qui divergeront.
+C'est la condition qui garantit qu'un second client, s'il en revenait un, ne
+trouverait aucune règle à réécrire : il traduirait `src/core/`, comme le fait
+l'API aujourd'hui, seule traductrice — pas une copie qui divergerait.
 """
 
 from __future__ import annotations

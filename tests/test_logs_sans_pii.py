@@ -79,8 +79,16 @@ def test_le_parcours_d_authentification_ne_fuite_rien_dans_les_logs(
     pipeline_de_logs_reel: io.StringIO,
 ) -> None:
     """Demande de code, vérification, `/moi`, déconnexion — la sortie JSON
-    rendue ne doit contenir ni l'adresse, ni le téléphone, ni le code, ni le
-    jeton de session (§2, interdiction n°2 ; contraintes-globales l.15-16).
+    rendue ne doit contenir ni l'adresse, ni le code, ni le jeton de session
+    (§2, interdiction n°2 ; contraintes-globales l.15-16).
+
+    Le corps posté à `/auth/code/verifie` porte aussi un champ `telephone` :
+    il n'existe plus dans `VerificationCode` depuis le retrait du téléphone
+    (2026-09-12, §5), donc les assertions sur `TEL` ci-dessous ne prouvent
+    plus rien sur un numéro de téléphone en particulier — elles prouvent,
+    par ricochet, qu'un champ inconnu transmis par un client ne ressort nulle
+    part dans les logs. C'est une propriété qui vaut d'être tenue : on la
+    garde plutôt que de la retirer.
 
     `client_auth` surcharge déjà le fournisseur de courriel par l'espion : le
     fournisseur `console` (seule exception documentée, `src/courriel/console.py`)

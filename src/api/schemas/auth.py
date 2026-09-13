@@ -1,8 +1,9 @@
 """Entrées et sorties de l'authentification.
 
 `EmailStr` de pydantic n'est PAS utilisé : la validation et la normalisation
-vivent dans `src/core/courriel_valide.py`, pour que le bot et l'API appliquent
-exactement la même règle.
+vivent dans `src/core/courriel_valide.py`, pour qu'un futur second client
+applique, lui aussi, exactement la même règle que l'API — sans avoir à la
+réécrire (CLAUDE.md §4).
 """
 
 from __future__ import annotations

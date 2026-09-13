@@ -64,7 +64,6 @@ def test_database_url_utilise_asyncpg(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_secrets_non_exposes_dans_repr() -> None:
     """Aucun secret ne doit fuiter dans les logs via un repr de config."""
     s = get_settings()
-    assert "TOKEN_DE_TEST" not in repr(s)
     assert "motdepasse_test" not in repr(s)
 
 

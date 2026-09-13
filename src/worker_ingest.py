@@ -184,9 +184,9 @@ if __name__ == "__main__":
 
 
 async def rafraichir_a_la_demande(cache: CacheRedis) -> dict[str, Decision]:
-    """Point d'entrée du bot : appelé quand un utilisateur ouvre la plateforme.
+    """Point d'entrée de l'API : appelé quand un utilisateur ouvre la plateforme.
 
-    Ne bloque jamais l'appelant. Le bot sert les offres déjà en base, et cette
+    Ne bloque jamais l'appelant. L'API sert les offres déjà en base, et cette
     fonction déclenche au besoin une passe de fond — au plus une à la fois par
     source, grâce au verrou Redis (§2.4).
     """

@@ -399,8 +399,8 @@ Le marché sénégalais est petit : les mêmes recruteurs à Dakar reçoivent to
 
 1. **4 templates de lettre minimum**, structurellement différents (ordre des paragraphes, longueur, formule d'accroche, présence ou non de puces). Variante choisie de façon déterministe par `hash(user_id + job_id) % n` pour la reproductibilité.
 2. **Aucune signature textuelle du service** dans les documents remis. Pas de mention du service, pas de footer, pas de métadonnée `Author` révélatrice dans le PDF.
-3. **Plafond par offre** : maximum 15 candidatures envoyées via le service pour une même offre (`job_application_stats`). Au-delà → mode brouillon uniquement, avec message honnête à l'utilisateur.
-4. **Refus de postuler si le profil ne correspond pas.** Si le score de matching < seuil, le service le dit et propose autre chose. Envoyer 25 candidatures hors-sujet nuit à l'utilisateur et brûle la réputation du domaine d'envoi.
+3. **Plafond par offre** : maximum 15 candidatures préparées via le service pour une même offre (`job_application_stats`). Comportement au-delà du plafond : **non tranché, §14.10** — l'ancienne règle (« mode brouillon uniquement ») décrivait un monde où « brouillon » se distinguait d'un envoi ; depuis le §2, interdiction n°1, c'est le seul mode, donc elle ne prescrit plus rien d'applicable.
+4. **Refus de postuler si le profil ne correspond pas.** Si le score de matching < seuil, le service le dit et propose autre chose. Envoyer 25 candidatures hors-sujet nuit à l'utilisateur et à la crédibilité du service auprès des recruteurs — pas à la réputation d'un domaine d'envoi que nous n'utilisons jamais pour écrire à un recruteur (§2, §7).
 5. **Jamais d'invention.** Le LLM ne doit produire aucune expérience, diplôme, certification ou durée qui ne figure pas dans le profil. Cette règle est répétée dans chaque prompt système et vérifiée par un post-contrôle : toute entreprise ou tout diplôme cité dans la lettre doit exister dans `profiles.structured`, sinon régénération.
 
 ---
@@ -534,6 +534,10 @@ Administration par **commandes CLI sur le VPS** (`docker compose exec api python
    **Ce canal était Telegram, et il n'a pas été remplacé.** Le seul client est une PWA, et le §7 n'autorise l'email transactionnel que pour la vérification d'adresse et l'alerte admin. L'exigence métier survit — la valeur doit être visible avant toute demande de paiement (§6) — mais **aucun canal ne la porte aujourd'hui**.
    Options, sans préférence de ma part : notifications push web (gratuites, mais capricieuses sur Android d'entrée de gamme et refusables), **email** d'alerte périodique (fiable, mais c'est un envoi récurrent vers de vrais utilisateurs : coût de délivrabilité, réputation du domaine, désabonnement obligatoire — un tout autre régime que le code de vérification), ou **consultation sans push**, l'utilisateur revenant voir ses offres.
    C'est un choix produit **et** un coût de délivrabilité : il appartient au porteur du projet. **Ne pas coder la Phase 4 avant qu'il soit tranché** — son critère de validation en dépend directement.
+
+10. **Que se passe-t-il au-delà du plafond de 15 candidatures préparées pour une même offre ?** — **Posé le 2026-09-13, non tranché.**
+    Le §8.3 fixe le plafond, mais sa conséquence — « mode brouillon uniquement » — décrivait le monde d'avant le 2026-09-08 : un mode où l'utilisateur pouvait recevoir un dossier sans dépôt possible par le service, distinct d'un mode où le service déposait à sa place. Depuis que l'interdiction n°1 du §2 s'est généralisée, **il n'y a plus qu'un seul mode** : le service prépare toujours, l'utilisateur dépose toujours. La règle du §8.3 prescrit donc, au-delà de 15, l'état déjà universel en-dessous : elle ne change plus rien.
+    Options, sans préférence de ma part : refuser de préparer un nouveau dossier pour cette offre une fois le plafond atteint (le compteur devient un vrai garde-fou) ; continuer à préparer mais avertir l'utilisateur que l'offre est saturée et le laisser décider ; ou ne rien faire et garder `job_application_stats` comme pure statistique, sans effet sur le comportement. C'est un choix produit — il détermine si la table sert à quelque chose — et il appartient au porteur du projet. **Ne pas coder la Phase 5 avant qu'il soit tranché** — c'est elle qui écrit réellement `job_application_stats` pour la première fois.
 
 ---
 

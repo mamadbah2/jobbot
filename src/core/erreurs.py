@@ -14,7 +14,6 @@ __all__ = [
     "PlafondGlobalAtteint",
     "CodeInvalide",
     "CodeExpire",
-    "CompteInexistant",
     "InscriptionIncomplete",
     "JetonInvalide",
     "NomInvalide",
@@ -56,12 +55,6 @@ class CodeExpire(ErreurMetier):
     """Code absent de Redis : expiré, ou jamais demandé."""
 
     code = "code_expire"
-
-
-class CompteInexistant(ErreurMetier):
-    """Signal INTERNE. Ne doit jamais sortir de /auth/code/demande (spec §8)."""
-
-    code = "compte_inexistant"
 
 
 class InscriptionIncomplete(ErreurMetier):
