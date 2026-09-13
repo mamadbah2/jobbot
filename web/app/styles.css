@@ -1,0 +1,59 @@
+:root {
+  --encre: #1a1a1a;
+  --papier: #ffffff;
+  --trait: #d4d4d4;
+  --accent: #0a6b4a;
+  --alerte: #9b2226;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  padding: 1.25rem;
+  max-width: 34rem;
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  font-size: 1rem;
+  line-height: 1.5;
+  color: var(--encre);
+  background: var(--papier);
+}
+
+h1 { font-size: 1.35rem; margin: 0 0 0.5rem; }
+p { margin: 0 0 1rem; }
+
+label { display: block; margin-bottom: 0.35rem; font-weight: 600; }
+
+input {
+  width: 100%;
+  padding: 0.7rem;
+  font-size: 1rem;
+  border: 1px solid var(--trait);
+  border-radius: 4px;
+}
+
+button {
+  width: 100%;
+  margin-top: 1rem;
+  padding: 0.8rem;
+  font-size: 1rem;
+  color: var(--papier);
+  background: var(--accent);
+  border: 0;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.erreur {
+  padding: 0.7rem;
+  margin-bottom: 1rem;
+  color: var(--alerte);
+  border: 1px solid var(--alerte);
+  border-radius: 4px;
+}
+
+.offre { padding: 0.8rem 0; border-bottom: 1px solid var(--trait); }
+.offre h2 { font-size: 1rem; margin: 0 0 0.2rem; }
+.offre .meta { font-size: 0.875rem; color: #555; }
+
+nav { margin-bottom: 1.5rem; font-size: 0.875rem; }
