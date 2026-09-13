@@ -1,3 +1,8 @@
-export default function Page() {
-  return <h1>JobBot</h1>
+import { redirect } from 'next/navigation'
+
+import { moi } from './api-client'
+
+export default async function PageRacine() {
+  const utilisateur = await moi()
+  redirect(utilisateur ? '/offres' : '/connexion')
 }
