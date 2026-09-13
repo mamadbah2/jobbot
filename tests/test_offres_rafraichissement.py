@@ -18,19 +18,28 @@ from __future__ import annotations
 from collections.abc import Coroutine
 from typing import Any
 
-from src.worker_ingest import rafraichir_a_la_demande
+from src.worker_ingest import SOURCES, rafraichir_a_la_demande
 from tests.conftest import FauxCache
 
 
 async def test_rafraichir_a_la_demande_accepte_un_planificateur() -> None:
     """Sans ce paramètre, l'API ne peut pas savoir quand la passe est finie,
-    donc ne peut pas fermer son client Redis au bon moment."""
+    donc ne peut pas fermer son client Redis au bon moment.
+
+    `assert planifiees` (et non seulement `decisions`) est ce qui distingue
+    « le paramètre est accepté » de « le paramètre est accepté ET utilisé » :
+    une implémentation qui l'ignorerait et planifierait quand même via le
+    `asyncio.create_task` par défaut rendrait `decisions` non vide sans que
+    `planifiees` le soit jamais — ce test doit pouvoir échouer sur ce cas.
+    """
     cache = FauxCache()
     planifiees: list[Coroutine[Any, Any, None]] = []
 
     decisions = await rafraichir_a_la_demande(cache, planifier=planifiees.append)
 
     assert decisions, "au moins une source doit être décidée"
+    assert planifiees, "la première visite doit planifier une passe via `planifier`"
+    assert len(planifiees) == len(SOURCES)
     # On ferme sans jamais démarrer : voir la note en tête de fichier.
     for coro in planifiees:
         coro.close()
@@ -45,6 +54,7 @@ async def test_une_seconde_visite_immediate_ne_relance_rien() -> None:
     premier_lot = len(planifiees)
     await rafraichir_a_la_demande(cache, planifier=planifiees.append)
 
+    assert premier_lot == len(SOURCES), "la première visite doit planifier une passe par source"
     assert len(planifiees) == premier_lot, "la seconde visite ne doit rien replanifier"
     for coro in planifiees:
         coro.close()

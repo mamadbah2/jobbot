@@ -44,17 +44,25 @@ async def _rafraichir_en_arriere_plan() -> None:
     )
     planifiees: list[asyncio.Task[None]] = []
     try:
-        # `cast` : les stubs de `redis-py` déclarent `delete`/`get`/`set` en
-        # retour `T | Awaitable[T]` (client synchrone ET asynchrone confondus),
-        # alors que `CacheRedis` déclare des méthodes `async def`. mypy compare
-        # alors `Awaitable[T]` à `Coroutine[Any, Any, Any]` et refuse — écart de
-        # typage des stubs, pas un vrai défaut de comportement à l'exécution.
-        await rafraichir_a_la_demande(
-            cast(CacheRedis, client),
-            planifier=lambda coro: planifiees.append(asyncio.create_task(coro)),
-        )
-        if planifiees:
-            await asyncio.gather(*planifiees, return_exceptions=True)
+        try:
+            # `cast` : les stubs de `redis-py` déclarent `delete`/`get`/`set` en
+            # retour `T | Awaitable[T]` (client synchrone ET asynchrone confondus),
+            # alors que `CacheRedis` déclare des méthodes `async def`. mypy compare
+            # alors `Awaitable[T]` à `Coroutine[Any, Any, Any]` et refuse — écart de
+            # typage des stubs, pas un vrai défaut de comportement à l'exécution.
+            await rafraichir_a_la_demande(
+                cast(CacheRedis, client),
+                planifier=lambda coro: planifiees.append(asyncio.create_task(coro)),
+            )
+        finally:
+            # Doit s'exécuter même si une source lève en cours de boucle (ou si
+            # la tâche est annulée) : sinon des passes déjà planifiées pour des
+            # sources précédentes tournent encore quand `client.aclose()`
+            # s'exécute plus bas, et `liberer_verrou` échoue sur un client
+            # fermé — la source reste verrouillée `ingest_verrou_secondes`
+            # (piège n°1 du brief, silencieux).
+            if planifiees:
+                await asyncio.gather(*planifiees, return_exceptions=True)
     except Exception as exc:  # noqa: BLE001 — une passe ratée ne casse jamais l'affichage
         log.error("rafraichissement_depuis_api_echoue", type_erreur=type(exc).__name__)
     finally:
