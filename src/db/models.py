@@ -64,12 +64,19 @@ class User(TimestampMixin, Base):
     __table_args__ = (_check_in("state", USER_STATES, "ck_users_state"),)
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    telegram_id: Mapped[int] = mapped_column(BigInteger, unique=True, nullable=False, index=True)
-    phone: Mapped[str | None] = mapped_column(String(32))
+    # Identité de connexion, et la seule, depuis le 2026-09-12 (CLAUDE.md §5).
+    # Avant le 2026-09-11 c'était `telegram_id` ; `phone` a été retiré par la
+    # migration 0005 (un numéro saisi au clavier n'est prouvé par rien, et sa
+    # contrainte d'unicité permettait de réserver celui d'autrui).
+    email: Mapped[str] = mapped_column(String(320), unique=True, nullable=False, index=True)
     full_name: Mapped[str | None] = mapped_column(String(255))
-    # Nullable : déduit du CV en Phase 2, confirmé par l'utilisateur avant le
-    # premier envoi car il sert de Reply-To (CLAUDE.md §7 et §14.5).
-    email: Mapped[str | None] = mapped_column(String(320))
+    # Incrémentée pour invalider d'un coup tous les jetons émis (§5).
+    # `server_default` en plus du défaut Python : sans lui, un INSERT hors
+    # ORM (migration de données, script ad hoc) violerait NOT NULL au lieu
+    # d'hériter silencieusement de 0 (revue finale, corrections mineures).
+    token_version: Mapped[int] = mapped_column(
+        Integer, default=0, server_default="0", nullable=False
+    )
     language: Mapped[str] = mapped_column(String(8), default="fr", nullable=False)
     state: Mapped[str] = mapped_column(String(16), default="onboarding", nullable=False)
 

@@ -1,5 +1,6 @@
-# Image unique pour les 3 process (bot, worker_ingest, worker_match).
-# La commande est choisie par docker-compose, pas ici.
+# Image unique pour les 4 process (api, worker_ingest, worker_match, migrate).
+# La commande normale est choisie par docker-compose, pas ici (CMD n'est qu'un
+# défaut de secours, cf. ci-dessous).
 FROM python:3.12-slim
 
 ENV PYTHONUNBUFFERED=1 \
@@ -24,4 +25,9 @@ COPY src/ ./src/
 RUN useradd --create-home --uid 10001 jobbot && chown -R jobbot:jobbot /app
 USER jobbot
 
-CMD ["python", "-m", "src.bot.main"]
+# `api` est le défaut le plus utile pour un `docker run jobbot` nu (réflexe de
+# débogage sur le VPS) : c'est le seul process qui répond sur un port, et le
+# web est désormais le seul client (CLAUDE.md §4). Même commande que le
+# service `api` de docker-compose.yml. Sans CMD explicite, l'image hériterait
+# de celui de `python:3.12-slim`, un interpréteur interactif.
+CMD ["python", "-m", "src.api.main"]

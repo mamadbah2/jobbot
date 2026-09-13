@@ -12,3 +12,6 @@ htmlcov/
 .coverage
 data/
 .claude/worktrees/
+
+# Workspace des exécutions de plan (subagent-driven development)
+.superpowers/

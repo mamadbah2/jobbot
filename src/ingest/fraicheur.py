@@ -112,8 +112,9 @@ async def rafraichir_si_necessaire(
 ) -> Decision:
     """Décide, planifie en arrière-plan, et rend la main immédiatement.
 
-    L'appelant (le bot) sert d'abord ce qu'il a en base : l'utilisateur est sur
-    une 3G comptée et ne doit jamais attendre une passe de scraping (§11).
+    L'appelant (l'API, qui sert le web) sert d'abord ce qu'il a en base :
+    l'utilisateur est sur une 3G comptée et ne doit jamais attendre une passe
+    de scraping (§11).
     """
     decision = await demander_rafraichissement(
         cache,

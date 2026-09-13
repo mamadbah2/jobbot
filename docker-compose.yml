@@ -11,6 +11,14 @@ x-app: &app
       condition: service_healthy
   restart: unless-stopped
 
+x-depends-app: &depends_app
+  postgres:
+    condition: service_healthy
+  redis:
+    condition: service_healthy
+  migrate:
+    condition: service_completed_successfully
+
 services:
   postgres:
     image: postgres:16-alpine
@@ -50,18 +58,12 @@ services:
     command: ["alembic", "upgrade", "head"]
     restart: "no"
 
-  bot:
+  api:
     <<: *app
-    command: ["python", "-m", "src.bot.main"]
+    command: ["python", "-m", "src.api.main"]
     ports:
       - "${HTTP_PORT:-8080}:${HTTP_PORT:-8080}"
-    depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-      migrate:
-        condition: service_completed_successfully
+    depends_on: *depends_app
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request,os,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:'+os.environ.get('HTTP_PORT','8080')+'/health', timeout=5).status==200 else 1)"]
       interval: 15s
@@ -69,27 +71,29 @@ services:
       retries: 5
       start_period: 20s
 
+  # Client Next.js. L'image est construite par le plan « client web » ;
+  # `web/Dockerfile` n'existe pas encore, donc ce service ne démarre pas tant
+  # que ce plan n'est pas exécuté. Déclaré ici pour que l'architecture du §4
+  # soit lisible dans un seul fichier.
+  web:
+    build:
+      context: ./web
+    env_file: .env
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+    profiles: ["web"]
+
   worker_ingest:
     <<: *app
     command: ["python", "-m", "src.worker_ingest"]
-    depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-      migrate:
-        condition: service_completed_successfully
+    depends_on: *depends_app
 
   worker_match:
     <<: *app
     command: ["python", "-m", "src.worker_match"]
-    depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-      migrate:
-        condition: service_completed_successfully
+    depends_on: *depends_app
 
 volumes:
   pgdata:

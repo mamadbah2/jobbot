@@ -1,7 +1,7 @@
 """Détection d'un scraper cassé (CLAUDE.md §7).
 
 « Si un scraper renvoie 0 offre alors qu'il en renvoyait > 0 la veille →
-log ERROR + notification Telegram à l'admin. Ne jamais échouer en silence. »
+log ERROR + alerte email à l'admin. Ne jamais échouer en silence. »
 """
 
 from __future__ import annotations

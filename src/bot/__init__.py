@@ -1,1 +1,0 @@
-"""Couche Telegram (aiogram)."""

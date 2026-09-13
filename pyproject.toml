@@ -1,11 +1,10 @@
 [project]
 name = "jobbot"
 version = "0.1.0"
-description = "JobBot Sénégal — bot Telegram de candidature assistée pour le marché de l'emploi sénégalais."
+description = "JobBot Sénégal — candidature assistée pour le marché de l'emploi sénégalais."
 requires-python = ">=3.11"
 readme = "README.md"
 dependencies = [
-    "aiogram>=3.13",
     "sqlalchemy[asyncio]>=2.0",
     "asyncpg>=0.29",
     "alembic>=1.13",
@@ -17,6 +16,8 @@ dependencies = [
     "uvicorn[standard]>=0.30",
     "httpx>=0.27",
     "selectolax>=0.3.21",
+    "email-validator>=2.2",
+    "pyjwt>=2.9",
 ]
 
 [project.optional-dependencies]
@@ -26,6 +27,7 @@ dev = [
     "pytest-cov>=5.0",
     "ruff>=0.6",
     "mypy>=1.10",
+    "pyyaml>=6.0",
 ]
 
 [build-system]
@@ -42,6 +44,15 @@ markers = [
     "integration: nécessite Postgres et Redis réels ; activé par RUN_INTEGRATION_TESTS=1",
 ]
 addopts = "-m 'not integration'"
+filterwarnings = [
+    # Avertissements internes à starlette.testclient (tâche 11), déclenchés dès
+    # l'import de `fastapi.testclient.TestClient` — code du brief, pas le nôtre.
+    # Corriger imposerait soit `httpx2` (dépendance non justifiée, §3), soit un
+    # downgrade de fastapi/starlette (hors périmètre). Portée volontairement
+    # étroite : seuls ces deux messages précis sont ignorés.
+    "ignore:Using .httpx. with .starlette\\.testclient. is deprecated.*httpx2.*:UserWarning",
+    "ignore:The anyio\\.abc\\.BlockingPortal alias is deprecated.*:DeprecationWarning",
+]
 
 [tool.ruff]
 line-length = 100
