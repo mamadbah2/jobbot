@@ -6,7 +6,7 @@
     "build": "next build",
     "start": "next start",
     "typecheck": "tsc --noEmit",
-    "test": "node --test test/",
+    "test": "node --test",
     "mesure": "node mesure-poids.mjs"
   },
   "dependencies": {
