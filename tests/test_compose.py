@@ -53,3 +53,23 @@ def test_les_services_applicatifs_partagent_la_meme_politique_de_dependance() ->
         "redis": {"condition": "service_healthy"},
         "migrate": {"condition": "service_completed_successfully"},
     }
+
+
+def test_l_api_reste_sur_la_boucle_locale() -> None:
+    """Si l'API est joignable de l'extérieur, on contourne Next et on se forge
+    le X-Forwarded-For de son choix : les plafonds par IP ne valent plus rien
+    (spec du client web §6)."""
+    assert all(str(p).startswith("127.0.0.1:") for p in SERVICES["api"]["ports"])
+
+
+def test_le_web_n_est_plus_derriere_un_profil() -> None:
+    """Le service était déclaré en prévision ; il devient réel."""
+    assert "profiles" not in SERVICES["web"]
+
+
+def test_le_web_est_publie_sur_l_hote() -> None:
+    assert any("WEB_HOST_PORT" in str(p) for p in SERVICES["web"]["ports"])
+
+
+def test_le_web_attend_que_l_api_soit_saine() -> None:
+    assert SERVICES["web"]["depends_on"]["api"] == {"condition": "service_healthy"}
