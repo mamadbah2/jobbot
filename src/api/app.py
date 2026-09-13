@@ -10,7 +10,7 @@ from __future__ import annotations
 from fastapi import FastAPI, Request, status
 from fastapi.responses import JSONResponse
 
-from src.api.routers import auth, moi, sante
+from src.api.routers import auth, moi, offres, sante
 from src.core.erreurs import (
     AdresseInvalide,
     CodeExpire,
@@ -121,4 +121,5 @@ def create_app() -> FastAPI:
     app.include_router(sante.router)
     app.include_router(auth.router)
     app.include_router(moi.router)
+    app.include_router(offres.router)
     return app

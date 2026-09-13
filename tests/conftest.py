@@ -200,3 +200,75 @@ def demander_code_verification(
     """Déclenche `/auth/code/demande` et renvoie le code intercepté par l'espion."""
     client.post("/auth/code/demande", json={"email": adresse})
     return espion.envois[-1][1]
+
+
+SOURCE_TEST = "jobbot-test"
+
+
+@pytest_asyncio.fixture
+async def offres_test(
+    base_utilisateurs_test: async_sessionmaker[AsyncSession],
+) -> AsyncIterator[list[int]]:
+    """Insère trois offres de test et ne purge qu'elles.
+
+    La base de développement est partagée et porte 232 offres réelles (§3 du
+    plan) : un `delete(Job)` sans filtre les détruirait.
+    """
+    from datetime import UTC, datetime
+
+    from src.db.models import Job
+
+    lignes = [
+        Job(
+            source=SOURCE_TEST,
+            source_id="t1",
+            url="https://exemple.test/1",
+            title="Comptable",
+            company="Alpha",
+            location="Dakar",
+            contract_type="CDI",
+            description="x" * 5000,
+            apply_method="email",
+            apply_email="rh@alpha.test",
+            posted_at=datetime(2026, 9, 10, tzinfo=UTC),
+            fingerprint="fp-t1",
+            raw={"secret": "ne doit pas sortir"},
+        ),
+        Job(
+            source=SOURCE_TEST,
+            source_id="t2",
+            url="https://exemple.test/2",
+            title="Developpeur",
+            company="Beta",
+            location="Thies",
+            contract_type="CDD",
+            description="y" * 5000,
+            apply_method="form",
+            posted_at=datetime(2026, 9, 12, tzinfo=UTC),
+            fingerprint="fp-t2",
+            raw={},
+        ),
+        Job(
+            source=SOURCE_TEST,
+            source_id="t3",
+            url="https://exemple.test/3",
+            title="Sans date",
+            company="Gamma",
+            location=None,
+            contract_type=None,
+            description=None,
+            apply_method="external",
+            posted_at=None,  # volontaire : teste le NULLS LAST
+            fingerprint="fp-t3",
+            raw=None,
+        ),
+    ]
+    async with base_utilisateurs_test() as s:
+        await s.execute(delete(Job).where(Job.source == SOURCE_TEST))
+        s.add_all(lignes)
+        await s.commit()
+        ids = [ligne.id for ligne in lignes]
+    yield ids
+    async with base_utilisateurs_test() as s:
+        await s.execute(delete(Job).where(Job.source == SOURCE_TEST))
+        await s.commit()
