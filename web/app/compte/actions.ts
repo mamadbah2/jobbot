@@ -19,8 +19,12 @@ export async function seDeconnecter(): Promise<void> {
   // L'API efface son cookie, mais c'est nous qui l'avons posé : il faut
   // l'effacer ici aussi. La révocation réelle tient à `token_version` côté
   // base, pas à la disparition du cookie.
+  // `path` explicite plutôt qu'implicite : un navigateur n'efface un cookie
+  // que si les attributs correspondent à ceux posés (`attributsCookieSession`,
+  // `path: '/'`) — c'est le défaut qui avait mordu `delete_cookie` côté
+  // Python en Phase 2.
   const magasin = await cookies()
-  magasin.delete(NOM_COOKIE)
+  magasin.delete({ name: NOM_COOKIE, path: '/' })
 
   journaliser('deconnexion')
   redirect('/connexion')

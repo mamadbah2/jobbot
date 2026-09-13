@@ -41,12 +41,23 @@ export const T = {
   titreOffres: "Offres d'emploi",
   aucuneOffre: "Aucune offre pour le moment. Revenez un peu plus tard.",
   voirOffre: "Voir l'offre",
+  lienIndisponible: 'Lien indisponible pour cette offre',
   parEmail: 'Candidature par email',
   parFormulaire: 'Candidature sur le site',
   parSiteExterne: 'Candidature sur un autre site',
+  pageInexistante: "Cette page n'existe pas.",
+  revenirPremierePage: 'Revenir à la première page',
+  pagePrecedente: 'Page précédente',
+  pageSuivante: 'Page suivante',
 
   titreCompte: 'Votre compte',
   boutonDeconnexion: 'Se déconnecter',
   lienOffres: 'Les offres',
   lienCompte: 'Mon compte',
+
+  // Panne réseau ou serveur pendant le chargement d'un écran (§11 : toujours
+  // une sortie, même quand tout casse). On dit quoi faire, jamais ce qui a
+  // cassé.
+  erreurTemporaire: "Nous n'arrivons pas à charger cette page pour le moment. Réessayez.",
+  reessayer: 'Réessayer',
 }

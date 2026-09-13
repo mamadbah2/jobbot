@@ -5,7 +5,22 @@ import { T } from '../textes'
 import { seDeconnecter } from './actions'
 
 export default async function PageCompte() {
-  const utilisateur = await moi()
+  let utilisateur
+  try {
+    utilisateur = await moi()
+  } catch {
+    // Panne réseau ou serveur : message court, action possible, jamais
+    // l'écran d'erreur générique de Next (§11).
+    return (
+      <main>
+        <nav>
+          <a href="/offres">{T.lienOffres}</a>
+        </nav>
+        <p>{T.erreurTemporaire}</p>
+        <a href="/compte">{T.reessayer}</a>
+      </main>
+    )
+  }
   if (!utilisateur) redirect('/connexion')
 
   return (
