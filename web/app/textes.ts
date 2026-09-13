@@ -36,6 +36,7 @@ export const T = {
   champNom: 'Votre prénom et votre nom',
   aideNom: "C'est votre première connexion : indiquez-nous votre nom.",
   boutonCode: 'Continuer',
+  retourConnexion: 'Utiliser une autre adresse email',
 
   titreOffres: "Offres d'emploi",
   aucuneOffre: "Aucune offre pour le moment. Revenez un peu plus tard.",

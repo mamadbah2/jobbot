@@ -42,6 +42,9 @@ export default async function PageCode({
         )}
         <button type="submit">{T.boutonCode}</button>
       </form>
+      <p className="issue-secours">
+        <a href="/connexion">{T.retourConnexion}</a>
+      </p>
     </main>
   )
 }

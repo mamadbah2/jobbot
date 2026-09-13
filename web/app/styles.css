@@ -57,3 +57,6 @@ button {
 .offre .meta { font-size: 0.875rem; color: #555; }
 
 nav { margin-bottom: 1.5rem; font-size: 0.875rem; }
+
+.issue-secours { margin-top: 1.5rem; text-align: center; font-size: 0.875rem; }
+.issue-secours a { color: #555; }
