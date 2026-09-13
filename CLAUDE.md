@@ -169,9 +169,12 @@ jobbot/
 │   │   ├── app.py             # construction de l'app FastAPI
 │   │   ├── deps.py            # session DB, utilisateur courant
 │   │   ├── schemas/           # entrées/sorties pydantic
+│   │   │   ├── auth.py
+│   │   │   └── offres.py      # projection explicite d'une offre, pas un dump du modèle
 │   │   └── routers/
 │   │       ├── auth.py        # /auth/code/demande, /auth/code/verifie, /auth/deconnexion
 │   │       ├── moi.py         # /moi
+│   │       ├── offres.py      # /offres, liste paginée réservée aux comptes connectés
 │   │       └── sante.py       # /health (DB + Redis) — déplacé depuis src/health.py
 │   ├── db/
 │   │   ├── models.py
@@ -211,8 +214,33 @@ jobbot/
 ├── tests/
 └── web/                       # client Next.js (TypeScript), même dépôt
     ├── app/
-    ├── Dockerfile             # build multi-étapes, `next start` en production
-    └── package.json
+    │   ├── layout.tsx          # <html lang="fr">, police système (§11)
+    │   ├── page.tsx            # racine : redirige vers /connexion ou /offres
+    │   ├── styles.css
+    │   ├── textes.ts           # TOUS les textes utilisateur ici, jamais inline (cf. bot/texts.py)
+    │   ├── journal.ts          # journal des abandons de parcours (§11)
+    │   ├── api-contrat.ts      # contrat d'API partagé : erreurs, cookies, leurs attributs
+    │   ├── api-client.ts       # couche réseau vers `api` (server-only, jamais côté navigateur)
+    │   ├── connexion/
+    │   │   ├── page.tsx        # saisie de l'adresse
+    │   │   ├── actions.ts      # Server Action : demande de code
+    │   │   └── code/
+    │   │       ├── page.tsx    # saisie du code (+ nom si compte nouveau)
+    │   │       └── actions.ts  # Server Action : vérification du code, création du compte
+    │   ├── compte/
+    │   │   ├── page.tsx        # adresse, nom, déconnexion
+    │   │   └── actions.ts      # Server Action : déconnexion (incrémente token_version)
+    │   └── offres/
+    │       └── page.tsx        # liste des offres, déclenche rafraichir_si_necessaire
+    ├── public/
+    │   └── .gitkeep             # dossier vide requis par le Dockerfile (COPY --from=build)
+    ├── test/
+    │   └── api-contrat.test.ts
+    ├── Dockerfile              # build multi-étapes, serveur `standalone` en production
+    ├── mesure-poids.mjs        # mesure le poids transféré, sans dépendance (§11)
+    ├── next.config.ts          # output: "standalone", images non optimisées
+    ├── package.json
+    └── tsconfig.json
 ```
 
 Les modules non encore écrits existent sous forme de package vide (`__init__.py` seul) : ils sont créés
@@ -431,7 +459,10 @@ Le marché sénégalais est petit : les mêmes recruteurs à Dakar reçoivent to
 
 - **Data chère et lente.** Messages courts. Pas d'images décoratives. Documents en PDF léger (< 300 Ko).
 - **Beaucoup d'utilisateurs abandonneront pendant l'onboarding** s'il y a plus de 4 étapes. Compter et logger les abandons à chaque étape du parcours web.
-- **Le web ne dispense pas de la sobriété.** Next.js est plus lourd qu'un rendu serveur classique : pas de librairie de composants lourde, polices locales via `next/font`, découpage de bundle agressif. Le poids transféré est un **critère de validation de phase**, pas un vœu.
+- **Le web ne dispense pas de la sobriété.** Next.js est plus lourd qu'un rendu serveur classique : pas de librairie de composants lourde, découpage de bundle agressif. Le poids transféré est un **critère de validation de phase**, pas un vœu.
+- Police **système** (`system-ui`), pas de fichier de police téléchargé : zéro octet
+  transféré et aucun saut de mise en page au chargement. Révise le 2026-09-13 la consigne
+  « polices locales via next/font », qui coûtait 15 à 40 Ko sur un budget de 200 Ko.
 - Français simple, sans jargon RH. Éviter « optimiser votre employabilité » ; dire « améliorer votre CV ».
 - Prévoir le tutoiement/vouvoiement cohérent (choisir le **vouvoiement**) et ne jamais mélanger.
 - Toujours proposer une sortie : chaque écran a un bouton retour, et une aide est joignable depuis n'importe quel écran.
@@ -466,6 +497,9 @@ Design détaillé : `docs/superpowers/specs/2026-09-11-socle-backend-design.md`,
 
 > Les critères 1 à 3 se vérifient par `curl` contre l'API (parcours du `README.md`). Le critère 4
 > appartient au client web, qui reste à écrire : c'est le vrai reste-à-faire de la Phase 2.
+
+> Les quatre critères passent depuis le 2026-09-13. Le client web existe, le critère 4 est
+> mesuré par `web/mesure-poids.mjs` et doublé en vrai navigateur.
 
 **Phase 3 — Profil (1 sem.)**
 Upload CV, parsing DeepSeek, validation par l'utilisateur, préférences. Exposé par l'API, consommé
