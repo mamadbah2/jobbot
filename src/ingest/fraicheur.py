@@ -16,23 +16,14 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Awaitable, Callable, Coroutine
 from dataclasses import dataclass
-from typing import Any, Protocol
+from typing import Any
 
+from src.core.cache import CacheRedis
 from src.logging_setup import get_logger
 
 log = get_logger(__name__)
 
 _PREFIXE = "jobbot:ingest"
-
-
-class CacheRedis(Protocol):
-    """Le strict minimum de l'API Redis dont ce module a besoin."""
-
-    async def get(self, name: str) -> Any: ...
-    async def set(
-        self, name: str, value: str, *, ex: int | None = None, nx: bool = False
-    ) -> Any: ...
-    async def delete(self, *names: str) -> Any: ...
 
 
 @dataclass(frozen=True, slots=True)

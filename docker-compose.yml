@@ -61,8 +61,14 @@ services:
   api:
     <<: *app
     command: ["python", "-m", "src.api.main"]
+    # Rabattu sur la boucle locale le 2026-09-13, quand `web` est devenu le
+    # frontal : le navigateur ne parle plus jamais à l'API directement. Laisser
+    # 0.0.0.0 permettrait de contourner Next et de se forger le
+    # `X-Forwarded-For` de son choix, ce qui annulerait les plafonds par IP de
+    # `core/auth/limites.py`. Le parcours curl du README continue de
+    # fonctionner en local. Même politique que postgres ci-dessus.
     ports:
-      - "${HTTP_PORT:-8080}:${HTTP_PORT:-8080}"
+      - "127.0.0.1:${HTTP_PORT:-8080}:${HTTP_PORT:-8080}"
     depends_on: *depends_app
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request,os,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:'+os.environ.get('HTTP_PORT','8080')+'/health', timeout=5).status==200 else 1)"]
@@ -71,19 +77,39 @@ services:
       retries: 5
       start_period: 20s
 
-  # Client Next.js. L'image est construite par le plan « client web » ;
-  # `web/Dockerfile` n'existe pas encore, donc ce service ne démarre pas tant
-  # que ce plan n'est pas exécuté. Déclaré ici pour que l'architecture du §4
-  # soit lisible dans un seul fichier.
+  # Client Next.js — le seul client du produit depuis le 2026-09-12, et le
+  # seul frontal HTTP depuis le 2026-09-13.
   web:
     build:
       context: ./web
-    env_file: .env
+    # Pas d'`env_file` ici, contrairement aux services Python : `web` ne reçoit
+    # QUE ce qui est nommé ci-dessous. Un réglage documenté dans `.env.example`
+    # mais absent de cette liste n'atteint jamais le process — c'est par ce
+    # trou qu'est passée la confiance au proxy. `tests/test_compose.py` le
+    # vérifie désormais, clé par clé.
+    environment:
+      API_BASE_URL: "http://api:${HTTP_PORT:-8080}"
+      COOKIE_SESSION_NOM: "${COOKIE_SESSION_NOM:-jobbot_session}"
+      ENVIRONMENT: "${ENVIRONMENT:-dev}"
+      WEB_DERRIERE_PROXY: "${WEB_DERRIERE_PROXY:-false}"
+    ports:
+      - "${WEB_HOST_PORT:-3000}:3000"
     depends_on:
       api:
         condition: service_healthy
+    # Sonde le process `web` lui-même, jamais un écran instrumenté : les pages
+    # de connexion émettent un évènement de parcours à chaque affichage, et un
+    # appel toutes les 15 s y noierait la mesure d'abandon.
+    # Suppose le `ENV HOSTNAME=0.0.0.0` du Dockerfile : sans lui, le serveur
+    # n'écoute pas sur la boucle locale du conteneur et ce test échouerait
+    # alors même que le service répond de l'extérieur.
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--spider", "http://127.0.0.1:3000/sante"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 20s
     restart: unless-stopped
-    profiles: ["web"]
 
   worker_ingest:
     <<: *app

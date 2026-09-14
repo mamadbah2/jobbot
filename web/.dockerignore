@@ -1,0 +1,12 @@
+# L'étage `deps` du Dockerfile installe les dépendances avec `npm ci` à partir du
+# lockfile ; sans ce fichier, le `COPY . .` de l'étage `build` écrase ce
+# node_modules propre avec celui de la machine hôte (s'il existe), rendant le
+# build non reproductible et gonflant inutilement le contexte envoyé au démon
+# Docker.
+node_modules
+.next
+
+# Artefacts locaux qui n'ont rien à faire dans une image.
+*.tsbuildinfo
+.env
+.env.*
