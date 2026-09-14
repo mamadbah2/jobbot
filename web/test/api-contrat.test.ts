@@ -86,3 +86,26 @@ test("chaque état de users.state a un libellé, et jamais la valeur brute", () 
   }
   assert.equal(etatLisible('valeur_ajoutee_plus_tard'), 'État inconnu')
 })
+
+test("un Set-Cookie sans Max-Age donne un cookie de session, jamais un Max-Age=0", () => {
+  // Le piège évité : un cookie `Max-Age=0` est supprimé aussitôt reçu par le
+  // navigateur. L'utilisateur verrait une connexion « réussie » suivie d'un
+  // rebond immédiat vers /connexion, sans la moindre explication.
+  const entetes = new Headers()
+  entetes.append('set-cookie', 'jobbot_session=abc.def.ghi; Path=/; HttpOnly; SameSite=lax')
+  const session = lireCookieSession(entetes)
+
+  assert.equal(session?.valeur, 'abc.def.ghi')
+  assert.equal(session?.maxAge, undefined)
+
+  const attributs = attributsCookieSession(session?.maxAge)
+  assert.ok(!('maxAge' in attributs), 'la clé maxAge doit être absente, pas posée à 0')
+})
+
+test('un Max-Age nul ou négatif est traité comme absent', () => {
+  for (const brut of ['Max-Age=0', 'Max-Age=-1']) {
+    const entetes = new Headers()
+    entetes.append('set-cookie', `jobbot_session=x; ${brut}; Path=/`)
+    assert.equal(lireCookieSession(entetes)?.maxAge, undefined, `non traité : ${brut}`)
+  }
+})

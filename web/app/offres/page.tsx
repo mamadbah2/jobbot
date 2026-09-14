@@ -2,6 +2,7 @@ import { redirect } from 'next/navigation'
 
 import { listerOffres, moi } from '../api-client'
 import { ErreurApi, type Offre } from '../api-contrat'
+import { EcranPanne } from '../ecran-panne'
 import { T } from '../textes'
 
 const LIMITE = 20
@@ -37,11 +38,23 @@ function dateLisible(publieeLe: string | null): string | null {
   )
 }
 
-/** Numéro de page borné à 1 minimum : un paramètre absent, non numérique ou
- *  négatif retombe sur la première page plutôt que de casser le rendu. */
+/** Au-delà, la page est de toute façon hors limites et l'écran le dira. */
+const PAGE_MAX = 100_000
+
+/** Numéro de page borné des DEUX côtés.
+ *
+ *  En bas : un paramètre absent, non numérique ou négatif retombe sur la
+ *  première page plutôt que de casser le rendu.
+ *
+ *  En haut, et c'est le défaut corrigé : `/offres?page=99999999999999999999`
+ *  produisait un décalage que JavaScript écrit en notation scientifique
+ *  (« 2e+21 »), que l'API refuse en 422. L'utilisateur lisait alors « Nous
+ *  n'arrivons pas à charger cette page » — un message de panne — au lieu de
+ *  « cette page n'existe pas », qui est la vérité. */
 function pageDemandee(brut: string | undefined): number {
   const nombre = Number(brut)
-  return Number.isInteger(nombre) && nombre >= 1 ? nombre : 1
+  if (!Number.isInteger(nombre) || nombre < 1) return 1
+  return Math.min(nombre, PAGE_MAX)
 }
 
 function LigneOffre({ offre }: { offre: Offre }) {
@@ -77,14 +90,11 @@ export default async function PageOffres({
     // Panne réseau ou serveur : message court, action possible, jamais
     // l'écran d'erreur générique de Next (§11). `moi()` a déjà résolu un 401
     // en `null` en interne, donc on n'arrive ici que pour une panne réelle.
-    return (
-      <main>
-        <p>{T.erreurTemporaire}</p>
-        <a href="/offres">{T.reessayer}</a>
-      </main>
-    )
+    return <EcranPanne reessayerHref="/offres" />
   }
-  if (!utilisateur) redirect('/connexion')
+  // Session périmée ou absente : on passe par la route qui efface le cookie,
+  // sinon il repart à chaque requête pour se faire refuser à chaque fois.
+  if (!utilisateur) redirect('/connexion/expiree')
 
   const { page: pageBrut } = await searchParams
   const pageNum = pageDemandee(pageBrut)
@@ -94,15 +104,13 @@ export default async function PageOffres({
   try {
     page = await listerOffres(LIMITE, decalage)
   } catch (erreur) {
-    if (erreur instanceof ErreurApi && erreur.statut === 401) redirect('/connexion')
+    // La session a pu expirer entre `/moi` et cet appel.
+    if (erreur instanceof ErreurApi && erreur.statut === 401) redirect('/connexion/expiree')
     return (
-      <main>
-        <nav>
-          <a href="/compte">{T.lienCompte}</a>
-        </nav>
-        <p>{T.erreurTemporaire}</p>
-        <a href={`/offres?page=${pageNum}`}>{T.reessayer}</a>
-      </main>
+      <EcranPanne
+        reessayerHref={`/offres?page=${pageNum}`}
+        retour={{ href: '/compte', libelle: T.lienCompte }}
+      />
     )
   }
 

@@ -1,7 +1,7 @@
 import { redirect } from 'next/navigation'
 
 import { moi } from './api-client'
-import { T } from './textes'
+import { EcranPanne } from './ecran-panne'
 
 export default async function PageRacine() {
   let utilisateur
@@ -12,12 +12,7 @@ export default async function PageRacine() {
     // résolu un 401 en `null` en interne, donc on n'arrive ici que pour une
     // panne véritable. On ne laisse jamais l'écran d'erreur générique de
     // Next s'afficher (§11 : toujours une sortie).
-    return (
-      <main>
-        <p>{T.erreurTemporaire}</p>
-        <a href="/">{T.reessayer}</a>
-      </main>
-    )
+    return <EcranPanne reessayerHref="/" />
   }
   redirect(utilisateur ? '/offres' : '/connexion')
 }

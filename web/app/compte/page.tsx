@@ -1,6 +1,7 @@
 import { redirect } from 'next/navigation'
 
 import { moi } from '../api-client'
+import { EcranPanne } from '../ecran-panne'
 import { etatLisible, T } from '../textes'
 import { seDeconnecter } from './actions'
 
@@ -11,17 +12,12 @@ export default async function PageCompte() {
   } catch {
     // Panne réseau ou serveur : message court, action possible, jamais
     // l'écran d'erreur générique de Next (§11).
-    return (
-      <main>
-        <nav>
-          <a href="/offres">{T.lienOffres}</a>
-        </nav>
-        <p>{T.erreurTemporaire}</p>
-        <a href="/compte">{T.reessayer}</a>
-      </main>
-    )
+    return <EcranPanne reessayerHref="/compte" retour={{ href: '/offres', libelle: T.lienOffres }} />
   }
-  if (!utilisateur) redirect('/connexion')
+  // `moi()` a résolu un 401 en `null` : la session est périmée ou absente. On
+  // passe par la route qui efface le cookie, sinon il repart à chaque requête
+  // pour se faire refuser à chaque fois.
+  if (!utilisateur) redirect('/connexion/expiree')
 
   return (
     <main>

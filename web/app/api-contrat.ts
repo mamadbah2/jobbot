@@ -24,7 +24,9 @@ export type Offre = {
 
 export type PageOffres = { offres: Offre[]; total: number }
 
-export type CookieSession = { nom: string; valeur: string; maxAge: number }
+/** `maxAge` optionnel : absent, le cookie devient un cookie de session, que le
+ *  navigateur garde jusqu'à la fermeture. Voir `attributsCookieSession`. */
+export type CookieSession = { nom: string; valeur: string; maxAge?: number }
 
 export class ErreurApi extends Error {
   // Champs déclarés explicitement plutôt qu'en propriétés de paramètre : le
@@ -83,10 +85,13 @@ export function lireCookieSession(entetes: Headers, nom = NOM_COOKIE): CookieSes
     const maxAge = attributs
       .map((a) => a.trim().toLowerCase())
       .find((a) => a.startsWith('max-age='))
+    const duree = maxAge ? Number(maxAge.slice('max-age='.length)) : Number.NaN
     return {
       nom,
       valeur: paire.slice(separateur + 1),
-      maxAge: maxAge ? Number(maxAge.slice('max-age='.length)) : 0,
+      // `undefined` et non `0` si l'API omettait `Max-Age` : voir
+      // `attributsCookieSession` ci-dessous pour pourquoi `0` serait un piège.
+      maxAge: Number.isFinite(duree) && duree > 0 ? duree : undefined,
     }
   }
   return null
@@ -94,15 +99,31 @@ export function lireCookieSession(entetes: Headers, nom = NOM_COOKIE): CookieSes
 
 /** Attributs du cookie de session, posés par le client web.
  *  Ils doivent refléter ceux de l'API (`poser_cookie` dans routers/auth.py) :
- *  un navigateur n'efface un cookie que si les attributs correspondent. */
-export function attributsCookieSession(maxAge: number) {
-  return {
+ *  un navigateur n'efface un cookie que si les attributs correspondent.
+ *
+ *  Un `maxAge` absent ou nul donne un cookie de SESSION — gardé jusqu'à la
+ *  fermeture du navigateur — et surtout PAS un `Max-Age=0`, que le navigateur
+ *  supprime aussitôt reçu. Le mode de défaillance évité est le pire qui soit :
+ *  connexion « réussie », cookie effacé dans la foulée, rebond immédiat vers
+ *  /connexion, et aucune explication pour l'utilisateur. */
+export type AttributsCookie = {
+  httpOnly: boolean
+  sameSite: 'lax'
+  secure: boolean
+  path: string
+  /** Absent = cookie de session. La clé est OMISE, jamais posée à
+   *  `undefined` : c'est ce qui distingue « pas de Max-Age » de « Max-Age=0 ». */
+  maxAge?: number
+}
+
+export function attributsCookieSession(maxAge?: number): AttributsCookie {
+  const base: AttributsCookie = {
     httpOnly: true,
     sameSite: 'lax' as const,
     secure: EN_PROD,
     path: '/',
-    maxAge,
   }
+  return maxAge && maxAge > 0 ? { ...base, maxAge } : base
 }
 
 export const COOKIE_ADRESSE = 'jobbot_adresse_en_cours'
