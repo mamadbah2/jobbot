@@ -342,7 +342,9 @@ Le quota de 25 est un **plafond de coût**, pas une limite arbitraire. Il doit �
 4. Première alerte envoyée immédiatement — **la valeur doit être visible avant toute demande de paiement**
 
 > **Par quel canal ?** Les alertes offres partaient par Telegram jusqu'au 2026-09-12 ; leur canal
-> de remplacement **n'est pas tranché** (§14.9). L'exigence ne bouge pas, le moyen est ouvert.
+> de remplacement est **tranché depuis le 2026-09-14** (§14.9) : notifications push web d'abord,
+> email périodique ensuite. Le push étant refusable et peu fiable sur Android d'entrée de gamme,
+> la **première** alerte de l'étape 4 doit être visible à l'écran, pas seulement poussée.
 
 Le parcours n'existe que sur le web. L'étape 1 demande **deux champs au lieu de trois** depuis le
 2026-09-12 : c'est autant de repris sur la contrainte du §11, où chaque étape supplémentaire coûte
@@ -517,10 +519,13 @@ par le web.
 *Validation : 10 CV réels de formats différents parsés correctement.*
 
 **Phase 4 — Offres et alertes (3 j.)**
-Matching, liste des offres dans le web, alertes 2x/jour, filtres, désabonnement.
-**Bloquée tant que le §14.9 n'est pas tranché** : le canal des alertes vers l'utilisateur est mort
-avec Telegram le 2026-09-12 et n'a pas de remplaçant. Le critère ci-dessous dépend de ce choix.
-*Validation : un utilisateur test reçoit des offres pertinentes 2 jours de suite.*
+Matching, filtres, alertes 2x/jour par **notifications push web** (§14.9, tranché le 2026-09-14).
+La liste des offres en lecture seule existe déjà, livrée avec le client web.
+Le push impose la **PWA** — service worker et clés VAPID — qui cesse donc d'être optionnelle.
+L'estimation de 3 jours date d'avant ce choix et ne couvrait pas le service worker.
+*Validation : un utilisateur test reçoit des offres pertinentes 2 jours de suite, **et** le cas
+d'un utilisateur qui refuse les notifications reste utilisable — il doit pouvoir consulter ses
+offres sans jamais rien recevoir.*
 
 **Phase 5 — Génération des documents (1 sem.)**
 CV adapté, lettre, rendu PDF, remise du dossier avec le mode de dépôt, quotas.
@@ -573,11 +578,18 @@ Administration par **commandes CLI sur le VPS** (`docker compose exec api python
    - *Tranché, non fait* : les actions d'exploitation (statistiques d'ingestion, état des scrapers, activation manuelle d'un abonnement) deviennent des commandes CLI sur le VPS. Aucune n'est écrite ; aucune n'a de besoin réel avant la Phase 6.
    - *Non tranché* : **par où passe le repli de paiement manuel côté utilisateur** (§10) ? Une page web qui affiche un numéro Wave et reçoit une capture d'écran est la piste, mais elle demande un écran, un stockage de pièce jointe et une modération — ce n'est pas un effet de bord du retrait de Telegram. À décider avec le porteur du projet avant la Phase 6.
 
-9. **Par quel canal les alertes offres arrivent-elles à l'utilisateur ?** — **Posé le 2026-09-12, non tranché. Bloque la Phase 4.**
+9. **Par quel canal les alertes offres arrivent-elles à l'utilisateur ?** — **Posé le 2026-09-12, TRANCHÉ le 2026-09-14 : notifications push web d'abord, email périodique plus tard.** Ne bloque plus la Phase 4.
    Le brief promet des alertes **poussées et récurrentes** : `worker_match` « push des alertes » (§4), 5/jour en Free et illimitées en Pro (§6), « première alerte envoyée immédiatement » à l'étape 4 de l'onboarding (§6), 2x/jour en Phase 4 (§12), validées par « un utilisateur test reçoit des offres pertinentes 2 jours de suite ».
    **Ce canal était Telegram, et il n'a pas été remplacé.** Le seul client est une PWA, et le §7 n'autorise l'email transactionnel que pour la vérification d'adresse et l'alerte admin. L'exigence métier survit — la valeur doit être visible avant toute demande de paiement (§6) — mais **aucun canal ne la porte aujourd'hui**.
-   Options, sans préférence de ma part : notifications push web (gratuites, mais capricieuses sur Android d'entrée de gamme et refusables), **email** d'alerte périodique (fiable, mais c'est un envoi récurrent vers de vrais utilisateurs : coût de délivrabilité, réputation du domaine, désabonnement obligatoire — un tout autre régime que le code de vérification), ou **consultation sans push**, l'utilisateur revenant voir ses offres.
-   C'est un choix produit **et** un coût de délivrabilité : il appartient au porteur du projet. **Ne pas coder la Phase 4 avant qu'il soit tranché** — son critère de validation en dépend directement.
+   **Décision du porteur du projet, le 2026-09-14 : les notifications push web d'abord ; l'email périodique viendra ensuite, quand le domaine existera.**
+
+   Ce que ce choix achète : le push ne dépend d'aucun nom de domaine, ne consomme presque pas de data (quelques centaines d'octets par message, ce qui compte sur une data comptée), et **la Phase 4 reste autonome** au lieu de se retrouver bloquée par le §14.1.
+
+   Ce qu'il coûte, et qu'il faut assumer les yeux ouverts : le push est **refusable d'un tap**, et les gestionnaires de batterie agressifs des Android d'entrée de gamme tuent les services en arrière-plan. **Une partie des utilisateurs ne recevra donc jamais d'alerte, sans qu'on puisse le savoir.** Conséquence directe sur l'onboarding (§6) : « la première alerte envoyée immédiatement » ne peut pas reposer sur le push seul — elle doit être **visible à l'écran** au moment où l'utilisateur finit son inscription, le push ne servant qu'aux alertes suivantes.
+
+   Conséquences techniques : le push exige HTTPS, un service worker et des clés VAPID. **La PWA, reportée en Phase 4 lors de la conception du client web, n'est donc plus optionnelle** : c'est le même service worker qui porte les deux. Mesurer son poids comme le reste (§11).
+
+   **L'email périodique reste la cible à terme**, pour rattraper ceux que le push n'atteint pas. Il est reporté, pas abandonné, et son arrivée impose alors : nom de domaine possédé avec SPF/DKIM/DMARC (§14.1), fournisseur d'envoi (§14.6), **désabonnement obligatoire**, et la gestion des rebonds que le §7 avait mise hors périmètre. C'est un tout autre régime que le code de vérification : à rouvrir explicitement le jour où on s'y met, pas à traiter comme une extension naturelle.
 
 10. **Que se passe-t-il au-delà du plafond de 15 candidatures préparées pour une même offre ?** — **Posé le 2026-09-13, non tranché.**
     Le §8.3 fixe le plafond, mais sa conséquence — « mode brouillon uniquement » — décrivait le monde d'avant le 2026-09-08 : un mode où l'utilisateur pouvait recevoir un dossier sans dépôt possible par le service, distinct d'un mode où le service déposait à sa place. Depuis que l'interdiction n°1 du §2 s'est généralisée, **il n'y a plus qu'un seul mode** : le service prépare toujours, l'utilisateur dépose toujours. La règle du §8.3 prescrit donc, au-delà de 15, l'état déjà universel en-dessous : elle ne change plus rien.
