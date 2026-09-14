@@ -217,7 +217,7 @@ jobbot/
     │   ├── layout.tsx          # <html lang="fr">, police système (§11)
     │   ├── page.tsx            # racine : redirige vers /connexion ou /offres
     │   ├── styles.css
-    │   ├── textes.ts           # TOUS les textes utilisateur ici, jamais inline (cf. bot/texts.py)
+    │   ├── textes.ts           # TOUS les textes utilisateur ici, jamais inline dans les composants
     │   ├── journal.ts          # journal des abandons de parcours (§11)
     │   ├── api-contrat.ts      # contrat d'API partagé : erreurs, cookies, leurs attributs
     │   ├── api-client.ts       # couche réseau vers `api` (server-only, jamais côté navigateur)
@@ -237,9 +237,11 @@ jobbot/
     ├── test/
     │   └── api-contrat.test.ts
     ├── Dockerfile              # build multi-étapes, serveur `standalone` en production
+    ├── .dockerignore           # exclut node_modules/.next/.env* du contexte de build
     ├── mesure-poids.mjs        # mesure le poids transféré, sans dépendance (§11)
     ├── next.config.ts          # output: "standalone", images non optimisées
     ├── package.json
+    ├── package-lock.json       # requis par `npm ci` dans l'étage `deps` du Dockerfile
     └── tsconfig.json
 ```
 
