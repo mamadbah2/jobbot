@@ -8,7 +8,7 @@ modèle économique suppose (décision du 2026-09-13).
 from __future__ import annotations
 
 import asyncio
-from typing import Annotated, cast
+from typing import Annotated
 
 import redis.asyncio as aioredis
 from fastapi import APIRouter, Depends, Query
@@ -19,7 +19,6 @@ from src.api import deps
 from src.api.schemas.offres import Offre, PageOffres
 from src.config import get_settings
 from src.db.models import Job, User
-from src.ingest.fraicheur import CacheRedis
 from src.logging_setup import get_logger
 from src.worker_ingest import rafraichir_a_la_demande
 
@@ -45,13 +44,11 @@ async def _rafraichir_en_arriere_plan() -> None:
     planifiees: list[asyncio.Task[None]] = []
     try:
         try:
-            # `cast` : les stubs de `redis-py` déclarent `delete`/`get`/`set` en
-            # retour `T | Awaitable[T]` (client synchrone ET asynchrone confondus),
-            # alors que `CacheRedis` déclare des méthodes `async def`. mypy compare
-            # alors `Awaitable[T]` à `Coroutine[Any, Any, Any]` et refuse — écart de
-            # typage des stubs, pas un vrai défaut de comportement à l'exécution.
+            # Aucun `cast` : `CacheRedis` (src/core/cache.py) déclare désormais
+            # ses méthodes en retour `Awaitable`, forme que les stubs de
+            # `redis-py` satisfont directement.
             await rafraichir_a_la_demande(
-                cast(CacheRedis, client),
+                client,
                 planifier=lambda coro: planifiees.append(asyncio.create_task(coro)),
             )
         finally:

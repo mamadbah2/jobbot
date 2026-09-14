@@ -21,6 +21,7 @@ from apscheduler.triggers.interval import IntervalTrigger
 
 from src.alerting import AlerteAdmin, construire_alerte
 from src.config import Settings, get_settings
+from src.core.cache import CacheRedis
 from src.db.session import dispose_engine, session_scope
 from src.ingest.base import (
     BaseScraper,
@@ -28,7 +29,7 @@ from src.ingest.base import (
     StructureInattendueError,
     scraper_semble_casse,
 )
-from src.ingest.fraicheur import CacheRedis, Decision, rafraichir_si_necessaire
+from src.ingest.fraicheur import Decision, rafraichir_si_necessaire
 from src.ingest.sources.emploidakar import EmploiDakarScraper
 from src.ingest.store import DepotOffres, DepotSql
 from src.logging_setup import get_logger, setup_logging
