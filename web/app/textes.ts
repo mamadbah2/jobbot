@@ -60,4 +60,10 @@ export const T = {
   // cassé.
   erreurTemporaire: "Nous n'arrivons pas à charger cette page pour le moment. Réessayez.",
   reessayer: 'Réessayer',
+
+  // Adresse inexistante. Sans cet écran, Next sert son 404 d'usine, en
+  // anglais et sans lien de sortie.
+  titreIntrouvable: 'Page introuvable',
+  aideIntrouvable: "Le lien que vous avez suivi ne mène à rien. Il a peut-être changé.",
+  retourAccueil: "Revenir à l'accueil",
 }
