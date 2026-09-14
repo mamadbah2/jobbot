@@ -216,26 +216,34 @@ jobbot/
     ├── app/
     │   ├── layout.tsx          # <html lang="fr">, police système (§11)
     │   ├── page.tsx            # racine : redirige vers /connexion ou /offres
+    │   ├── not-found.tsx       # 404 en français, avec une sortie (§11) — Server Component
+    │   ├── ecran-panne.tsx     # écran de panne partagé par les pages qui appellent l'API
+    │   ├── icon.svg            # favicon ; évite un GET /favicon.ico en 404 à chaque page
     │   ├── styles.css
     │   ├── textes.ts           # TOUS les textes utilisateur ici, jamais inline dans les composants
-    │   ├── journal.ts          # journal des abandons de parcours (§11)
+    │   ├── journal.ts          # journal des abandons de parcours (§11), étapes typées
     │   ├── api-contrat.ts      # contrat d'API partagé : erreurs, cookies, leurs attributs
     │   ├── api-client.ts       # couche réseau vers `api` (server-only, jamais côté navigateur)
+    │   ├── sante/
+    │   │   └── route.ts        # sonde du healthcheck compose ; jamais un écran instrumenté
     │   ├── connexion/
     │   │   ├── page.tsx        # saisie de l'adresse
     │   │   ├── actions.ts      # Server Action : demande de code
+    │   │   ├── expiree/
+    │   │   │   └── route.ts    # efface le cookie périmé puis renvoie (interdit dans une page)
     │   │   └── code/
     │   │       ├── page.tsx    # saisie du code (+ nom si compte nouveau)
     │   │       └── actions.ts  # Server Action : vérification du code, création du compte
     │   ├── compte/
-    │   │   ├── page.tsx        # adresse, nom, déconnexion
+    │   │   ├── page.tsx        # adresse, nom, état, déconnexion
     │   │   └── actions.ts      # Server Action : déconnexion (incrémente token_version)
     │   └── offres/
     │       └── page.tsx        # liste des offres, déclenche rafraichir_si_necessaire
     ├── public/
     │   └── .gitkeep             # dossier vide requis par le Dockerfile (COPY --from=build)
     ├── test/
-    │   └── api-contrat.test.ts
+    │   ├── api-contrat.test.ts
+    │   └── api-client.test.ts  # transport du cookie, absence de X-Forwarded-For sans proxy
     ├── Dockerfile              # build multi-étapes, serveur `standalone` en production
     ├── .dockerignore           # exclut node_modules/.next/.env* du contexte de build
     ├── mesure-poids.mjs        # mesure le poids transféré, sans dépendance (§11)
