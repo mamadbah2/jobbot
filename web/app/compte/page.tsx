@@ -1,7 +1,7 @@
 import { redirect } from 'next/navigation'
 
 import { moi } from '../api-client'
-import { T } from '../textes'
+import { etatLisible, T } from '../textes'
 import { seDeconnecter } from './actions'
 
 export default async function PageCompte() {
@@ -34,6 +34,10 @@ export default async function PageCompte() {
         <br />
         {utilisateur.email}
       </p>
+      {/* L'état, que la spec §5 réclame et que le plan avait perdu en route.
+          `etatLisible` en fait une phrase : « active » est un identifiant de
+          base de données, pas une information pour l'utilisateur. */}
+      <p className="meta">{etatLisible(utilisateur.etat)}</p>
       <form action={seDeconnecter}>
         <button type="submit">{T.boutonDeconnexion}</button>
       </form>

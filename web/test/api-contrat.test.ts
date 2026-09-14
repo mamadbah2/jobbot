@@ -2,7 +2,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 
 import { ipCliente, lireCookieSession, attributsCookieSession } from '../app/api-contrat.ts'
-import { texteErreur, ERREURS } from '../app/textes.ts'
+import { etatLisible, texteErreur, ERREURS } from '../app/textes.ts'
 
 test("ipCliente ne garde que la première IP de la chaîne", () => {
   const entetes = new Headers({ 'x-forwarded-for': '41.82.1.9, 172.18.0.4, 10.0.0.2' })
@@ -65,4 +65,15 @@ test('chaque code d’erreur de l’API a une phrase', () => {
 test('un code inconnu tombe sur le message par défaut, jamais sur le code brut', () => {
   assert.equal(texteErreur('code_invente_par_un_attaquant'), ERREURS.defaut)
   assert.equal(texteErreur(undefined), null)
+})
+
+test("chaque état de users.state a un libellé, et jamais la valeur brute", () => {
+  // La liste fait foi dans USER_STATES (src/db/models.py). Si elle y gagne une
+  // valeur sans que ce fichier suive, le repli parle encore français.
+  for (const etat of ['onboarding', 'active', 'blocked']) {
+    const libelle = etatLisible(etat)
+    assert.ok(libelle, `état sans libellé : ${etat}`)
+    assert.notEqual(libelle, etat, `libellé brut affiché pour ${etat}`)
+  }
+  assert.equal(etatLisible('valeur_ajoutee_plus_tard'), 'État inconnu')
 })

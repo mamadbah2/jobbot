@@ -67,3 +67,23 @@ export const T = {
   aideIntrouvable: "Le lien que vous avez suivi ne mène à rien. Il a peut-être changé.",
   retourAccueil: "Revenir à l'accueil",
 }
+
+/** Libellés des valeurs de `users.state` — la liste fait foi dans
+ *  `USER_STATES` (src/db/models.py), pas ici.
+ *
+ *  On affiche une phrase, jamais la valeur brute « active » : c'est un
+ *  identifiant technique, pas du français, et le §11 proscrit le jargon.
+ *
+ *  Le repli n'est pas de la prudence gratuite : la colonne est un
+ *  `VARCHAR` + `CHECK` précisément pour pouvoir gagner une valeur sans
+ *  migration bloquante (§5). Le jour où cela arrive, l'écran doit dire
+ *  quelque chose plutôt que rien. */
+const ETATS: Record<string, string> = {
+  onboarding: 'Inscription en cours',
+  active: 'Compte actif',
+  blocked: 'Compte suspendu',
+}
+
+export function etatLisible(etat: string): string {
+  return ETATS[etat] ?? 'État inconnu'
+}
