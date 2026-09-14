@@ -91,8 +91,12 @@ async def lister_offres(
     lignes = (await session.execute(requete)).scalars().all()
     total = (await session.execute(select(func.count()).select_from(Job))).scalar_one()
 
-    tache = asyncio.create_task(_rafraichir_en_arriere_plan())
-    _TACHES_DE_FOND.add(tache)
-    tache.add_done_callback(_TACHES_DE_FOND.discard)
+    # Seulement sur la première page. Depuis que la pagination existe, feuilleter
+    # ouvrirait une connexion Redis neuve par page pour une décision toujours
+    # négative : le repère de fraîcheur vient d'être posé par la page 1.
+    if decalage == 0:
+        tache = asyncio.create_task(_rafraichir_en_arriere_plan())
+        _TACHES_DE_FOND.add(tache)
+        tache.add_done_callback(_TACHES_DE_FOND.discard)
 
     return PageOffres(offres=[Offre.depuis(j) for j in lignes], total=total)

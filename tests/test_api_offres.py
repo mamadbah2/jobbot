@@ -85,6 +85,39 @@ def test_offres_planifie_le_rafraichissement(
 
 
 @pytest.mark.integration
+def test_feuilleter_ne_redeclenche_pas_le_rafraichissement(
+    client_auth: TestClient,
+    fournisseur_courriel_espion: FournisseurCourrielEspion,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Seule la première page déclenche une passe.
+
+    Sans cette garde, chaque page feuilletée ouvrait un client Redis neuf
+    pour une décision toujours négative : le repère de fraîcheur venait
+    d'être posé par la page 1. Le coût est invisible, donc il ne se
+    remarquerait jamais sans un test qui le nomme.
+    """
+    appels = 0
+
+    async def _espion() -> None:
+        nonlocal appels
+        appels += 1
+
+    monkeypatch.setattr(offres_router, "_rafraichir_en_arriere_plan", _espion)
+
+    _connecter(client_auth, fournisseur_courriel_espion)
+    assert client_auth.get("/offres", params={"decalage": 20}).status_code == 200
+
+    # Même attente active que le test ci-dessus : si une tâche était planifiée,
+    # elle aurait tout le temps de s'exécuter dans cet intervalle.
+    for _ in range(50):
+        if appels:
+            break
+        time.sleep(0.01)
+    assert appels == 0, "une page au-delà de la première ne doit rien déclencher"
+
+
+@pytest.mark.integration
 def test_offres_sans_cookie_refuse(client_auth: TestClient) -> None:
     r = client_auth.get("/offres")
     assert r.status_code == 401
@@ -131,13 +164,15 @@ def test_les_offres_sans_date_ne_passent_pas_en_tete(
     """Sans `NULLS LAST`, Postgres remonte les NULL en TÊTE sur un DESC :
     « Sans date » serait alors la première ligne de la première page.
 
-    On n'affirme pas sa position absolue : la base de développement est
-    partagée, porte 232 offres réelles qu'on n'a pas le droit de purger, et
-    une future passe d'ingestion pourrait y ajouter d'autres offres sans
-    date. Le test serait rouge sans qu'aucun code n'ait bougé.
+    On n'affirme pas la position absolue des offres de la fixture : la base
+    de développement est partagée et porte des centaines d'offres réelles
+    qu'on n'a pas le droit de purger. On affirme leur ORDRE RELATIF, que
+    leurs dates en 2099 rendent indépendant des données réelles : aucune
+    offre ingérée ne peut passer devant elles.
 
-    Les deux offres datées de la fixture portent des dates plus récentes que
-    toute offre réelle en base (max 2026-09-08), elles sont donc en tête.
+    La seconde assertion, elle, est robuste par construction et sans aucune
+    hypothèse sur les données : sans `NULLS LAST`, « Sans date » serait en
+    position 1 quel que soit le contenu de la base.
     """
     _connecter(client_auth, fournisseur_courriel_espion)
     premiere_page = client_auth.get("/offres", params={"limite": 50}).json()["offres"]

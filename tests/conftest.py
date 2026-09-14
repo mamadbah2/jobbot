@@ -211,8 +211,15 @@ async def offres_test(
 ) -> AsyncIterator[list[int]]:
     """Insère trois offres de test et ne purge qu'elles.
 
-    La base de développement est partagée et porte 232 offres réelles (§3 du
-    plan) : un `delete(Job)` sans filtre les détruirait.
+    La base de développement est partagée et porte plus de 300 offres réelles
+    (§3 du plan) : un `delete(Job)` sans filtre les détruirait.
+
+    Les deux offres datées le sont en **2099**, et non à une date proche.
+    Une date proche ne les met en tête que tant qu'assez peu d'offres réelles
+    la dépassent — une marge qui se consomme toute seule à chaque passe
+    d'ingestion, maintenant que `GET /offres` en déclenche une à chaque
+    visite. Le test finirait par rougir sans qu'une ligne de code ait bougé.
+    Une date hors d'atteinte supprime la dépendance aux données.
     """
     from datetime import UTC, datetime
 
@@ -230,7 +237,7 @@ async def offres_test(
             description="x" * 5000,
             apply_method="email",
             apply_email="rh@alpha.test",
-            posted_at=datetime(2026, 9, 10, tzinfo=UTC),
+            posted_at=datetime(2099, 9, 10, tzinfo=UTC),
             fingerprint="fp-t1",
             raw={"secret": "ne doit pas sortir"},
         ),
@@ -244,7 +251,7 @@ async def offres_test(
             contract_type="CDD",
             description="y" * 5000,
             apply_method="form",
-            posted_at=datetime(2026, 9, 12, tzinfo=UTC),
+            posted_at=datetime(2099, 9, 12, tzinfo=UTC),
             fingerprint="fp-t2",
             raw={},
         ),
