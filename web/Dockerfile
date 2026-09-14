@@ -16,6 +16,14 @@ WORKDIR /app
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
 ENV PORT=3000
+# Sans cette ligne, le serveur n'écoute PAS sur 0.0.0.0, par accident : le
+# `server.js` de `output: "standalone"` lit `process.env.HOSTNAME || '0.0.0.0'`,
+# et Docker renseigne HOSTNAME avec l'ID du conteneur. Le service n'écoutait
+# donc que sur l'IP du conteneur, `wget http://127.0.0.1:3000` était refusé
+# depuis l'intérieur, et c'est pourquoi `web` était le seul service sans
+# healthcheck. Le Dockerfile officiel de Next porte la même ligne, pour la
+# même raison.
+ENV HOSTNAME="0.0.0.0"
 # `output: "standalone"` produit un serveur autonome et sa liste minimale de
 # modules : l'image ne porte ni les sources, ni les dépendances de build.
 COPY --from=build /app/.next/standalone ./
