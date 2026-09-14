@@ -43,9 +43,31 @@ export class ErreurApi extends Error {
   }
 }
 
+/** `true` seulement si un reverse proxy se tient RÉELLEMENT devant `web`.
+ *  Fermé par défaut, et c'est le point important : aujourd'hui `web` est publié
+ *  en direct sur l'hôte, rien ne se tient devant lui. Le seul `X-Forwarded-For`
+ *  que Next puisse alors lire est celui que le client écrit lui-même — le
+ *  relayer à l'API rendrait les plafonds par IP de `core/auth/limites.py`
+ *  contournables à volonté, en faisant simplement tourner la valeur. */
+function derriereProxyParDefaut(): boolean {
+  return process.env.WEB_DERRIERE_PROXY === 'true'
+}
+
 /** Une SEULE IP, jamais la chaîne : les proxys ne s'accordent pas sur
- *  l'extrémité qui fait foi. Avec une seule valeur, la question disparaît. */
-export function ipCliente(entetes: Headers): string | null {
+ *  l'extrémité qui fait foi. Avec une seule valeur, la question disparaît.
+ *
+ *  Rend `null` tant qu'aucun proxy n'est déclaré. Conséquence assumée en
+ *  développement : les plafonds par IP se comportent comme un plafond GLOBAL,
+ *  puisque l'API ne voit alors que l'adresse du conteneur `web`. On préfère
+ *  l'assumer en le sachant que croire à une protection qui n'existe pas.
+ *
+ *  `derriereProxy` est un paramètre à valeur par défaut, et non une constante
+ *  de module, pour rester testable sans manipuler l'environnement du process. */
+export function ipCliente(
+  entetes: Headers,
+  derriereProxy: boolean = derriereProxyParDefaut(),
+): string | null {
+  if (!derriereProxy) return null
   const chaine = entetes.get('x-forwarded-for')
   if (!chaine) return null
   const premiere = chaine.split(',')[0]?.trim()

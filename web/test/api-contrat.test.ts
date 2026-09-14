@@ -6,11 +6,19 @@ import { texteErreur, ERREURS } from '../app/textes.ts'
 
 test("ipCliente ne garde que la première IP de la chaîne", () => {
   const entetes = new Headers({ 'x-forwarded-for': '41.82.1.9, 172.18.0.4, 10.0.0.2' })
-  assert.equal(ipCliente(entetes), '41.82.1.9')
+  assert.equal(ipCliente(entetes, true), '41.82.1.9')
 })
 
 test("ipCliente rend null quand l'en-tête est absent", () => {
-  assert.equal(ipCliente(new Headers()), null)
+  assert.equal(ipCliente(new Headers(), true), null)
+})
+
+test("ipCliente ignore le X-Forwarded-For tant qu'aucun proxy n'est déclaré", () => {
+  // Le cas RÉEL aujourd'hui : rien ne se tient devant `web`. L'en-tête ne peut
+  // donc venir que du client lui-même ; le relayer laisserait n'importe qui
+  // contourner les plafonds par IP en faisant tourner la valeur.
+  const forge = new Headers({ 'x-forwarded-for': '1.2.3.4' })
+  assert.equal(ipCliente(forge, false), null)
 })
 
 test('lireCookieSession extrait la valeur et le max-age', () => {

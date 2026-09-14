@@ -82,10 +82,16 @@ services:
   web:
     build:
       context: ./web
+    # Pas d'`env_file` ici, contrairement aux services Python : `web` ne reçoit
+    # QUE ce qui est nommé ci-dessous. Un réglage documenté dans `.env.example`
+    # mais absent de cette liste n'atteint jamais le process — c'est par ce
+    # trou qu'est passée la confiance au proxy. `tests/test_compose.py` le
+    # vérifie désormais, clé par clé.
     environment:
       API_BASE_URL: "http://api:${HTTP_PORT:-8080}"
       COOKIE_SESSION_NOM: "${COOKIE_SESSION_NOM:-jobbot_session}"
       ENVIRONMENT: "${ENVIRONMENT:-dev}"
+      WEB_DERRIERE_PROXY: "${WEB_DERRIERE_PROXY:-false}"
     ports:
       - "${WEB_HOST_PORT:-3000}:3000"
     depends_on:
