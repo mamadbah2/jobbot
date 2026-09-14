@@ -5,7 +5,7 @@ import { redirect } from 'next/navigation'
 
 import { COOKIE_ADRESSE, ErreurApi, attributsCookieAdresse } from '../api-contrat'
 import { demanderCode } from '../api-client'
-import { journaliser } from '../journal'
+import { codeConnu, journaliser } from '../journal'
 
 export async function envoyerCode(formData: FormData): Promise<void> {
   const adresse = String(formData.get('adresse') ?? '').trim()
@@ -24,7 +24,7 @@ export async function envoyerCode(formData: FormData): Promise<void> {
   }
 
   if (echec) {
-    journaliser('adresse_refusee', { code: echec })
+    journaliser('adresse_refusee', { code: codeConnu(echec) })
     redirect(`/connexion?erreur=${encodeURIComponent(echec)}`)
   }
 

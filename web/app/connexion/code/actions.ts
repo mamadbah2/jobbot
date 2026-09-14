@@ -5,7 +5,7 @@ import { redirect } from 'next/navigation'
 
 import { COOKIE_ADRESSE, ErreurApi, attributsCookieSession } from '../../api-contrat'
 import { verifierCode } from '../../api-client'
-import { journaliser } from '../../journal'
+import { codeConnu, journaliser } from '../../journal'
 
 export async function validerCode(formData: FormData): Promise<void> {
   const magasin = await cookies()
@@ -37,7 +37,7 @@ export async function validerCode(formData: FormData): Promise<void> {
   }
 
   if (echec) {
-    journaliser('code_refuse', { code: echec })
+    journaliser('code_refuse', { code: codeConnu(echec) })
     redirect(`/connexion/code?erreur=${encodeURIComponent(echec)}`)
   }
 

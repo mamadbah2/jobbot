@@ -2,6 +2,7 @@ import { cookies } from 'next/headers'
 import { redirect } from 'next/navigation'
 
 import { COOKIE_ADRESSE } from '../../api-contrat'
+import { journaliser } from '../../journal'
 import { texteErreur, T } from '../../textes'
 import { validerCode } from './actions'
 
@@ -16,6 +17,11 @@ export default async function PageCode({
   const { erreur, nom } = await searchParams
   const message = texteErreur(erreur)
   const nomRequis = nom === 'requis'
+
+  // Après le `redirect` ci-dessus, donc seulement quand l'écran s'affiche
+  // vraiment. C'est ici qu'on perd les gens qui n'ont pas reçu le code et
+  // qui referment l'onglet : sans cette vue, cet abandon est invisible.
+  journaliser('vue_code')
 
   return (
     <main>

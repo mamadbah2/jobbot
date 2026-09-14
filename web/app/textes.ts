@@ -3,6 +3,28 @@
 //
 // Vouvoiement partout, français simple, aucun jargon RH (CLAUDE.md §11).
 
+/** Les codes d'erreur que l'API peut renvoyer. Liste FERMÉE, et c'est ce qui
+ *  la rend utile : `journal.ts` s'en sert pour que seul un de ces littéraux
+ *  puisse entrer dans les journaux, ce qui interdit à la compilation d'y
+ *  glisser un texte libre — et avec lui une adresse email.
+ *
+ *  Un test vérifie que cette liste et `ERREURS` ci-dessous ne divergent pas. */
+export const CODES_ERREUR = [
+  'adresse_invalide',
+  'trop_de_demandes',
+  'plafond_global_atteint',
+  'envoi_impossible',
+  'code_invalide',
+  'code_expire',
+  'inscription_incomplete',
+  'nom_invalide',
+  'jeton_invalide',
+  'erreur_metier',
+  'defaut',
+] as const
+
+export type CodeErreur = (typeof CODES_ERREUR)[number]
+
 export const ERREURS: Record<string, string> = {
   adresse_invalide: "Cette adresse email ne semble pas valide. Vérifiez-la et réessayez.",
   trop_de_demandes: "Vous avez fait trop d'essais. Patientez un moment avant de recommencer.",

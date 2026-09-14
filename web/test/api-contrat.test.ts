@@ -2,7 +2,8 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 
 import { ipCliente, lireCookieSession, attributsCookieSession } from '../app/api-contrat.ts'
-import { etatLisible, texteErreur, ERREURS } from '../app/textes.ts'
+import { etatLisible, texteErreur, CODES_ERREUR, ERREURS } from '../app/textes.ts'
+import { codeConnu } from '../app/journal.ts'
 
 test("ipCliente ne garde que la première IP de la chaîne", () => {
   const entetes = new Headers({ 'x-forwarded-for': '41.82.1.9, 172.18.0.4, 10.0.0.2' })
@@ -46,25 +47,33 @@ test('le cookie de session reste httpOnly et SameSite=lax', () => {
   assert.equal(a.maxAge, 2592000)
 })
 
-test('chaque code d’erreur de l’API a une phrase', () => {
-  for (const code of [
-    'adresse_invalide',
-    'trop_de_demandes',
-    'plafond_global_atteint',
-    'envoi_impossible',
-    'code_invalide',
-    'code_expire',
-    'inscription_incomplete',
-    'nom_invalide',
-    'jeton_invalide',
-  ]) {
-    assert.ok(ERREURS[code], `code sans texte : ${code}`)
+test('chaque code d’erreur de l’API a une phrase, et réciproquement', () => {
+  // Les deux sens comptent. CODES_ERREUR gouverne ce qui a le droit d'entrer
+  // dans les journaux (journal.ts) ; ERREURS gouverne ce que l'utilisateur
+  // lit. Une liste qui prend de l'avance sur l'autre casse l'un des deux en
+  // silence.
+  for (const code of CODES_ERREUR) {
+    assert.ok(ERREURS[code], `code sans phrase : ${code}`)
+  }
+  for (const code of Object.keys(ERREURS)) {
+    assert.ok(
+      (CODES_ERREUR as readonly string[]).includes(code),
+      `phrase sans code déclaré : ${code}`,
+    )
   }
 })
 
 test('un code inconnu tombe sur le message par défaut, jamais sur le code brut', () => {
   assert.equal(texteErreur('code_invente_par_un_attaquant'), ERREURS.defaut)
   assert.equal(texteErreur(undefined), null)
+})
+
+test('codeConnu refuse une chaîne arbitraire venue du réseau', () => {
+  // La garde qui empêche une adresse email d'entrer dans les journaux si un
+  // jour l'API renvoyait un code inattendu.
+  assert.equal(codeConnu('code_invalide'), 'code_invalide')
+  assert.equal(codeConnu('awa@example.sn'), 'defaut')
+  assert.equal(codeConnu(''), 'defaut')
 })
 
 test("chaque état de users.state a un libellé, et jamais la valeur brute", () => {
