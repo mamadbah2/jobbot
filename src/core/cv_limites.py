@@ -20,6 +20,10 @@ _PREFIXE = "jobbot:cv:analyses"
 _UN_JOUR = 86_400
 
 
+def _cle(user_id: int, secret: str) -> str:
+    return f"{_PREFIXE}:{empreinte(str(user_id), secret)}:{fenetre_jour()}"
+
+
 async def autoriser_analyse_cv(
     cache: CacheRedis, *, user_id: int, par_jour: int, secret: str
 ) -> None:
@@ -28,6 +32,22 @@ async def autoriser_analyse_cv(
     Appelée AVANT tout travail : refuser après avoir extrait le texte serait du
     calcul payé pour rien, et refuser après l'appel LLM serait de l'argent perdu.
     """
-    cle = f"{_PREFIXE}:{empreinte(str(user_id), secret)}:{fenetre_jour()}"
+    cle = _cle(user_id, secret)
     if await incrementer(cache, cle, _UN_JOUR) > par_jour:
         raise TropDAnalyses
+
+
+async def liberer_analyse_cv(cache: CacheRedis, *, user_id: int, secret: str) -> None:
+    """Rend la place prise par `autoriser_analyse_cv` (§9).
+
+    À n'appeler que quand RIEN n'a été payé : DeepSeek injoignable. Une analyse
+    qui a coûté de l'argent puis échoué (`CvIllisible` après relance) garde sa
+    place consommée.
+
+    Ne descend jamais sous zéro : si la clé du jour a expiré ou changé de jour
+    entre le dépôt et l'échec, un `decr` aveugle créerait un compteur négatif,
+    c'est-à-dire des analyses gratuites offertes à l'utilisateur.
+    """
+    cle = _cle(user_id, secret)
+    if await cache.decr(cle) < 0:
+        await cache.incr(cle)

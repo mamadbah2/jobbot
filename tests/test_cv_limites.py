@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import pytest
 
-from src.core.cv_limites import autoriser_analyse_cv
+from src.core.cv_limites import autoriser_analyse_cv, liberer_analyse_cv
 from src.core.erreurs import TropDAnalyses
 from tests.conftest import FauxCache
 
@@ -52,3 +52,22 @@ async def test_le_compteur_expire_au_bout_dun_jour() -> None:
     cache = FauxCache()
     await autoriser_analyse_cv(cache, user_id=1, par_jour=3, secret=SECRET)
     assert list(cache.ttl.values()) == [86_400]
+
+
+async def test_liberer_rend_la_place() -> None:
+    cache = FauxCache()
+    for _ in range(3):
+        await autoriser_analyse_cv(cache, user_id=1, par_jour=3, secret=SECRET)
+    await liberer_analyse_cv(cache, user_id=1, secret=SECRET)
+    await autoriser_analyse_cv(cache, user_id=1, par_jour=3, secret=SECRET)
+
+
+async def test_liberer_sans_compteur_ne_descend_pas_sous_zero() -> None:
+    """Clé expirée ou changement de jour : un compteur négatif offrirait des
+    analyses gratuites."""
+    cache = FauxCache()
+    await liberer_analyse_cv(cache, user_id=1, secret=SECRET)
+    for _ in range(3):
+        await autoriser_analyse_cv(cache, user_id=1, par_jour=3, secret=SECRET)
+    with pytest.raises(TropDAnalyses):
+        await autoriser_analyse_cv(cache, user_id=1, par_jour=3, secret=SECRET)

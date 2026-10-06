@@ -25,8 +25,8 @@ from src.config import Settings, get_settings
 from src.core import cv_fichier
 from src.core.auth import cles
 from src.core.cv_etat import etat_affiche
-from src.core.cv_limites import autoriser_analyse_cv
-from src.core.erreurs import CvTropGros, ProfilAbsent
+from src.core.cv_limites import autoriser_analyse_cv, liberer_analyse_cv
+from src.core.erreurs import AnalyseIndisponible, CvTropGros, ErreurMetier, ProfilAbsent
 from src.db.models import Profile, UsageCounter, User
 from src.db.session import session_scope
 from src.llm.client import appeler_deepseek
@@ -118,75 +118,103 @@ async def consigner_cout(
     )
 
 
+def _ouvrir_redis() -> aioredis.Redis:
+    """Client propre à la tâche de fond. `decode_responses=False` : l'image est
+    binaire, la relire décodée la corromprait en tentant de l'interpréter en UTF-8.
+    Isolé pour que les tests puissent le substituer."""
+    client: aioredis.Redis = aioredis.from_url(get_settings().redis_url, decode_responses=False)
+    return client
+
+
 async def _analyser_en_arriere_plan(
-    user_id: int, texte: str | None, cle_image: str | None, type_image: str | None
+    user_id: int,
+    texte: str | None,
+    cle_image: str | None,
+    type_image: str | None,
+    demarre_le: datetime,
 ) -> None:
     """Possède son propre client Redis et sa propre session.
 
     Le client de `deps.cache_redis` est fermé en fin de requête : le passer ici
     laisserait la tâche travailler sur une connexion morte — piège déjà payé en
     Phase 2 sur le rafraîchissement des offres.
+
+    Rien ne doit s'en échapper : une exception sortant d'ici tuerait la tâche sur
+    « Task exception was never retrieved », et asyncio journalise alors la trace
+    chaînée, message compris — or le message d'une erreur de base peut porter le
+    contenu d'un CV.
     """
+    try:
+        await _analyser(user_id, texte, cle_image, type_image, demarre_le)
+    except Exception as exc:  # noqa: BLE001 — dernière barrière, nom du type seulement
+        log.error("cv_tache_de_fond_echouee", user_id=user_id, type_erreur=type(exc).__name__)
+
+
+async def _analyser(
+    user_id: int,
+    texte: str | None,
+    cle_image: str | None,
+    type_image: str | None,
+    demarre_le: datetime,
+) -> None:
     settings = get_settings()
-    client: aioredis.Redis = aioredis.from_url(settings.redis_url, decode_responses=False)
+    client = _ouvrir_redis()
     try:
         image: bytes | None = None
         if cle_image is not None:
             lu = await client.get(cle_image)
             await client.delete(cle_image)
-            # `decode_responses=False` : ce sont des octets, ou rien si le TTL
-            # a expiré.
             image = lu if isinstance(lu, bytes) else None
             if image is None:
                 # Le TTL a expiré avant qu'on consomme l'image. Pas de reprise à
                 # écrire : l'utilisateur redépose.
-                await _marquer_echec(user_id, "image_expiree")
+                await _echec_sans_fuite(user_id, "image_expiree", None, demarre_le)
                 return
 
-        profil, transcription, cout = await analyser_cv(
-            texte=texte,
-            image=image,
-            type_image=type_image,
-            # `modele` : garde contre une image envoyée à un modèle qui ne la lit
-            # pas (DEEPSEEK_MODELE est configurable). La température vient de
-            # `analyser_cv`, qui la tire de `TEMPERATURE_CV` : jamais en dur ici.
-            modele=settings.deepseek_modele,
-            appeler=lambda messages, temperature: appeler_deepseek(
-                messages,
+        try:
+            profil, transcription, cout = await analyser_cv(
+                texte=texte,
+                image=image,
+                type_image=type_image,
+                # `modele` : garde contre une image envoyée à un modèle qui ne la
+                # lit pas (DEEPSEEK_MODELE est configurable). La température vient
+                # de `analyser_cv` (`TEMPERATURE_CV`) : jamais en dur ici.
                 modele=settings.deepseek_modele,
-                cle_api=settings.deepseek_api_key.get_secret_value(),
-                temperature=temperature,
-            ),
-        )
-    except Exception as exc:  # noqa: BLE001 — une analyse ratée n'est pas une panne
-        # Seul le NOM du type : le message d'une exception de cette chaîne peut
-        # contenir un fragment de CV, et une alerte admin recopie son contexte
-        # par le réseau (§7).
-        # Un `ValueError` (garde de `analyser_cv`) est une erreur de
-        # programmeur, par exemple un DEEPSEEK_MODELE mal réglé : son nom de
-        # type la distingue d'une panne de DeepSeek dans le journal.
-        code = getattr(exc, "code", None) or "analyse_echouee"
-        # Deux appels payés ne doivent pas disparaître (`CvIllisible.cout`).
-        cout_perdu = getattr(exc, "cout", None)
-        log.error(
-            "cv_analyse_echouee",
-            user_id=user_id,
-            type_erreur=type(exc).__name__,
-            cout_usd=None if cout_perdu is None else str(cout_perdu),
-        )
-        await _marquer_echec(user_id, str(code), cout_perdu)
-        return
+                appeler=lambda messages, temperature: appeler_deepseek(
+                    messages,
+                    modele=settings.deepseek_modele,
+                    cle_api=settings.deepseek_api_key.get_secret_value(),
+                    temperature=temperature,
+                ),
+            )
+        except Exception as exc:  # noqa: BLE001 — une analyse ratée n'est pas une panne
+            # Seul le NOM du type : le message peut contenir un fragment de CV, et
+            # une alerte admin recopie son contexte par le réseau (§7). Un
+            # `ValueError` (garde de `analyser_cv`) est une erreur de
+            # programmeur, par exemple un DEEPSEEK_MODELE mal réglé : son nom la
+            # distingue d'une panne de DeepSeek.
+            # `ErreurMetier` seulement : `openai.APIError` porte aussi un `.code`,
+            # qui n'a rien à faire dans un VARCHAR(64) lu par le client web.
+            code = exc.code if isinstance(exc, ErreurMetier) else "analyse_echouee"
+            # Deux appels payés ne doivent pas disparaître (`CvIllisible.cout`).
+            cout_perdu = getattr(exc, "cout", None)
+            log.error(
+                "cv_analyse_echouee",
+                user_id=user_id,
+                type_erreur=type(exc).__name__,
+                cout_usd=None if cout_perdu is None else str(cout_perdu),
+            )
+            if isinstance(exc, AnalyseIndisponible):
+                # Rien n'a été payé : le quota n'est pas décompté (§9). Un échec
+                # qui a coûté de l'argent, lui, garde sa place consommée.
+                await _liberer_sans_fuite(client, user_id, settings)
+            await _echec_sans_fuite(user_id, code, cout_perdu, demarre_le)
+            return
     finally:
         await client.aclose()
 
     async with session_scope() as session:
-        ligne = await _profil_de(session, user_id)
-        if ligne is None:  # compte supprimé pendant l'analyse
-            return
-        ligne.raw_cv_text = transcription
-        ligne.structured = profil
-        ligne.parse_etat = "pret"
-        ligne.parse_erreur = None
+        # Le coût est dû même si le résultat est périmé : l'appel a été payé.
         await consigner_cout(
             session,
             user_id,
@@ -194,6 +222,15 @@ async def _analyser_en_arriere_plan(
             tokens_sortie=cout.tokens_sortie,
             cout_usd=cout.cout_usd,
         )
+        ligne = await _profil_de(session, user_id)
+        # Garde optimiste : si un dépôt plus récent a changé `parse_demarre_le`,
+        # le gagnant ne doit pas être celui qui FINIT en dernier, mais celui qui
+        # a DÉPOSÉ en dernier. Sinon le profil de l'ancien CV écraserait le neuf.
+        if ligne is not None and ligne.parse_demarre_le == demarre_le:
+            ligne.raw_cv_text = transcription
+            ligne.structured = profil
+            ligne.parse_etat = "pret"
+            ligne.parse_erreur = None
     log.info(
         "cv_analyse_terminee",
         user_id=user_id,
@@ -203,19 +240,73 @@ async def _analyser_en_arriere_plan(
     )
 
 
-async def _marquer_echec(user_id: int, code: str, cout: Decimal | None = None) -> None:
+async def _liberer_sans_fuite(client: aioredis.Redis, user_id: int, settings: Settings) -> None:
+    try:
+        await liberer_analyse_cv(
+            client,
+            user_id=user_id,
+            secret=cles.deriver(settings.jwt_secret.get_secret_value(), "limite"),
+        )
+    except Exception as exc:  # noqa: BLE001 — jamais de chaînage vers l'original
+        log.error("cv_liberation_quota_echouee", user_id=user_id, type_erreur=type(exc).__name__)
+
+
+async def _echec_sans_fuite(
+    user_id: int, code: str, cout: Decimal | None, demarre_le: datetime
+) -> None:
+    """Appelée depuis un bloc `except` : sans son propre garde, une exception de
+    la base sortirait avec `__context__` = l'exception d'origine."""
+    try:
+        await _marquer_echec(user_id, code, cout, demarre_le)
+    except Exception as exc:  # noqa: BLE001 — nom du type seulement
+        log.error("cv_marquage_echec_echoue", user_id=user_id, type_erreur=type(exc).__name__)
+
+
+async def _marquer_echec(
+    user_id: int, code: str, cout: Decimal | None = None, demarre_le: datetime | None = None
+) -> None:
     """`cout` : dollars déjà payés (deux appels après une relance ratée). Le
     cas le plus coûteux est aussi celui où l'argent disparaîtrait sans trace.
-    Les tokens ne sont pas connus ici : seul le montant l'est."""
+    Les tokens ne sont pas connus ici : seul le montant l'est.
+
+    `demarre_le` : même garde optimiste que le succès — l'échec d'un ancien dépôt
+    ne doit pas écraser l'analyse en cours d'un dépôt plus récent."""
     async with session_scope() as session:
         ligne = await _profil_de(session, user_id)
-        if ligne is not None:
+        if ligne is not None and (demarre_le is None or ligne.parse_demarre_le == demarre_le):
             ligne.parse_etat = "echec"
             ligne.parse_erreur = code
         if isinstance(cout, Decimal) and cout > 0:
-            await consigner_cout(
-                session, user_id, tokens_entree=0, tokens_sortie=0, cout_usd=cout
-            )
+            await consigner_cout(session, user_id, tokens_entree=0, tokens_sortie=0, cout_usd=cout)
+
+
+async def preparer_profil(session: AsyncSession, user_id: int, demarre_le: datetime) -> Profile:
+    """Pose le profil en `en_cours` par un upsert atomique.
+
+    Lire puis insérer laisserait deux dépôts simultanés (le double-tap sur un
+    bouton lent en 3G) s'insérer tous deux : le second violerait l'unicité de
+    `profiles.user_id`. Le contenu précédent (`structured`) est conservé jusqu'à
+    la fin de la nouvelle analyse.
+    """
+    insertion = pg_insert(Profile).values(
+        user_id=user_id, parse_etat="en_cours", parse_erreur=None, parse_demarre_le=demarre_le
+    )
+    await session.execute(
+        insertion.on_conflict_do_update(
+            index_elements=["user_id"],
+            set_={
+                "parse_etat": "en_cours",
+                "parse_erreur": None,
+                "parse_demarre_le": demarre_le,
+            },
+        )
+    )
+    # `populate_existing` : l'objet peut déjà être dans la session avec les
+    # valeurs d'avant l'upsert.
+    requete = (
+        select(Profile).where(Profile.user_id == user_id).execution_options(populate_existing=True)
+    )
+    return (await session.execute(requete)).scalar_one()
 
 
 def _planifier(coro: Any) -> None:
@@ -252,8 +343,10 @@ async def deposer_cv(
     cle_image: str | None = None
     if cv_fichier.est_une_image(type_cv):
         # Une photo n'a pas de texte à extraire : elle doit survivre jusqu'à la
-        # tâche de fond. Redis avec un TTL court — jamais le disque, jamais
-        # Postgres, donc jamais une sauvegarde (spec §8).
+        # tâche de fond. Redis avec un TTL court, jamais Postgres, donc jamais une
+        # sauvegarde (spec §8). Le disque n'est pas touché non plus : le fichier
+        # reçu reste en mémoire parce que `spool_max_size` est relevé au plafond
+        # du CV (cf. `create_app`).
         cle_image = f"{_PREFIXE_IMAGE}:{utilisateur.id}:{datetime.now(UTC).timestamp()}"
         await cache.set(cle_image, contenu, ex=settings.cv_image_ttl_secondes)
     else:
@@ -261,18 +354,10 @@ async def deposer_cv(
             contenu, type_cv, minimum=settings.cv_texte_min_caracteres
         )
 
-    profil = await _profil_de(session, utilisateur.id)
-    if profil is None:
-        profil = Profile(user_id=utilisateur.id)
-        session.add(profil)
-    profil.parse_etat = "en_cours"
-    profil.parse_erreur = None
-    profil.parse_demarre_le = datetime.now(UTC)
-    await session.flush()
+    demarre_le = datetime.now(UTC)
+    profil = await preparer_profil(session, utilisateur.id, demarre_le)
 
-    _planifier(
-        _analyser_en_arriere_plan(utilisateur.id, texte, cle_image, type_cv)
-    )
+    _planifier(_analyser_en_arriere_plan(utilisateur.id, texte, cle_image, type_cv, demarre_le))
     return _vue(profil)
 
 
@@ -289,7 +374,10 @@ async def corriger_profil(
         raise ProfilAbsent
 
     structure = dict(profil.structured)
-    for champ, valeur in corps.model_dump().items():
+    # `exclude_unset` : un champ omis par le client reste tel quel ; sans lui,
+    # omettre `competences` les viderait. Les champs que ce schéma ignore
+    # (`telephone`, `pretention_salariale`, expériences...) survivent pareil.
+    for champ, valeur in corps.model_dump(exclude_unset=True).items():
         structure[champ] = valeur
     profil.structured = structure
     return _vue(profil)

@@ -83,6 +83,11 @@ class FauxCache:
             self.ttl.pop(name, None)
         return efface
 
+    async def decr(self, name: str) -> int:
+        valeur = int(self.valeurs.get(name, "0")) - 1
+        self.valeurs[name] = str(valeur)
+        return valeur
+
     async def incr(self, name: str) -> int:
         valeur = int(self.valeurs.get(name, "0")) + 1
         self.valeurs[name] = str(valeur)

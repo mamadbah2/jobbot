@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from fastapi import FastAPI, Request, status
 from fastapi.responses import JSONResponse
+from starlette.formparsers import MultiPartParser
 
 from src.api.routers import auth, moi, offres, profil, sante
 from src.config import get_settings
@@ -74,6 +75,11 @@ _STATUTS: dict[type[ErreurMetier], int] = {
 
 
 def create_app() -> FastAPI:
+    # Starlette bascule une pièce jointe de la mémoire vers un VRAI fichier
+    # temporaire au-delà de 1 Mio : une photo de 3 Mo toucherait le disque, ce que
+    # la spec §8 interdit pour un CV. Plafonné au maximum accepté, tout fichier
+    # reste en mémoire.
+    MultiPartParser.spool_max_size = get_settings().cv_taille_max_octets + MARGE_MULTIPART
     # docs/redoc/openapi désactivés : surface d'attaque inutile ici, les seuls
     # clients de cette API sont écrits dans ce même dépôt.
     app = FastAPI(title="JobBot", docs_url=None, redoc_url=None, openapi_url=None)
