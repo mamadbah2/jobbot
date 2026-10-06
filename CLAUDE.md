@@ -109,6 +109,10 @@ Les paquets sont ajoutés phase par phase, pas tous d'un coup, pour garder l'ima
 > **`selectolax` borné `<1` le 2026-10-06** : la version 1.0 a supprimé le backend Modest que
 > `src/ingest/sources/emploidakar.py` importe (`selectolax.parser`). Sans borne, une reconstruction
 > d'image récupérait la 1.x et `api` ne démarrait plus (import de `worker_ingest` au chargement).
+> **Périmètre du défaut** : seul `src/ingest/sources/emploidakar.py` importe `selectolax`, donc
+> seuls `worker_ingest` (qui l'importe) et `api` (dont `routers/offres.py` importe `worker_ingest`)
+> sont exposés. `worker_match` ne l'est pas : il n'importe que `config`, `db.session` et
+> `logging_setup`. À revérifier avec `grep -rn selectolax src` si un import change.
 > Migrer vers `selectolax.lexbor` est un chantier d'ingestion à part : il change le moteur de
 > parsing, donc les fixtures sont à rejouer.
 
