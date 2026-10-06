@@ -15,7 +15,8 @@ from src.core.cache import CacheRedis
 
 
 def empreinte(valeur: str, secret: str) -> str:
-    """Clé Redis opaque : ni l'adresse ni l'IP n'y figurent en clair (§14.4).
+    """Clé Redis opaque : ni l'adresse, ni l'IP, ni l'identifiant utilisateur n'y
+    figurent en clair (§14.4).
 
     Tronquée à 32 caractères — une clé Redis n'a pas besoin des 64 du digest
     complet, et la collision reste hors d'atteinte à cette longueur.
@@ -42,7 +43,7 @@ async def incrementer(cache: CacheRedis, cle: str, duree: int) -> int:
 
     Le TTL est (re)posé à chaque passage avec `NX`, et non seulement à la
     création. Sans cela, un processus qui meurt entre l'`incr` et l'`expire`
-    laisse une clé éternelle : une fois le plafond franchi, l'adresse est
+    laisse une clé éternelle : une fois le plafond franchi, la cible est
     bloquée pour toujours et il faut intervenir à la main dans Redis.
     `NX` rend l'opération auto-réparante sans jamais rallonger une fenêtre
     déjà en cours.
