@@ -169,3 +169,24 @@ def test_secret_jwt_absent_du_dump(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("JWT_SECRET", "ne_doit_pas_apparaitre")
     get_settings.cache_clear()
     assert "ne_doit_pas_apparaitre" not in str(get_settings().model_dump())
+
+
+def test_les_reglages_du_cv_ont_des_defauts_surs() -> None:
+    """Un déploiement qui oublie ces variables doit rester borné, pas illimité."""
+    r = get_settings()
+    assert r.deepseek_modele == "deepseek-flash"
+    assert r.cv_taille_max_mo == 5
+    assert r.cv_texte_min_caracteres == 200
+    assert r.cv_analyses_par_jour == 5
+    assert r.cv_image_ttl_secondes == 600
+    assert r.cv_analyse_delai_max_secondes == 300
+
+
+def test_la_cle_deepseek_est_un_secret(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Un `str` nu finirait dans un `repr` de Settings, donc potentiellement
+    dans une trace d'erreur ou un log de démarrage."""
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-secret-de-test")
+    get_settings.cache_clear()
+    r = get_settings()
+    assert "sk-secret-de-test" not in repr(r)
+    assert r.deepseek_api_key.get_secret_value() == "sk-secret-de-test"

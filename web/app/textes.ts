@@ -19,6 +19,13 @@ export const CODES_ERREUR = [
   'inscription_incomplete',
   'nom_invalide',
   'jeton_invalide',
+  'cv_type_refuse',
+  'cv_trop_gros',
+  'cv_sans_texte',
+  'cv_illisible',
+  'trop_d_analyses',
+  'analyse_indisponible',
+  'profil_absent',
   'erreur_metier',
   'defaut',
 ] as const
@@ -37,6 +44,14 @@ export const ERREURS: Record<string, string> = {
   inscription_incomplete: "Il nous manque votre nom pour créer votre compte.",
   nom_invalide: "Ce nom ne semble pas valide. Utilisez votre prénom et votre nom.",
   jeton_invalide: "Votre session a expiré. Reconnectez-vous.",
+  cv_type_refuse: "Nous acceptons les fichiers PDF, Word, ou une photo de votre CV.",
+  cv_trop_gros: "Ce fichier est trop lourd. Essayez un fichier de moins de 5 Mo.",
+  cv_sans_texte:
+    "Nous n'avons pas réussi à lire le texte de ce document. S'il s'agit d'un scan, envoyez plutôt une photo de votre CV.",
+  cv_illisible: "Ce fichier n'a pas pu être ouvert. Vérifiez qu'il n'est pas protégé par un mot de passe.",
+  trop_d_analyses: "Vous avez déjà analysé plusieurs CV aujourd'hui. Revenez demain.",
+  analyse_indisponible: "L'analyse n'est pas disponible pour le moment. Réessayez dans quelques minutes.",
+  profil_absent: "Déposez d'abord votre CV.",
   erreur_metier: "Une erreur est survenue. Réessayez.",
   defaut: "Une erreur est survenue. Réessayez.",
 }

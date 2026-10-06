@@ -13,14 +13,21 @@ from fastapi.responses import JSONResponse
 from src.api.routers import auth, moi, offres, sante
 from src.core.erreurs import (
     AdresseInvalide,
+    AnalyseIndisponible,
     CodeExpire,
     CodeInvalide,
+    CvIllisible,
+    CvSansTexte,
+    CvTropGros,
+    CvTypeRefuse,
     EnvoiImpossible,
     ErreurMetier,
     InscriptionIncomplete,
     JetonInvalide,
     NomInvalide,
     PlafondGlobalAtteint,
+    ProfilAbsent,
+    TropDAnalyses,
     TropDeDemandes,
 )
 from src.logging_setup import get_logger
@@ -51,6 +58,13 @@ _STATUTS: dict[type[ErreurMetier], int] = {
     # pas le défaut 400 par omission (revue finale, corrections mineures).
     CodeInvalide: status.HTTP_400_BAD_REQUEST,
     CodeExpire: status.HTTP_400_BAD_REQUEST,
+    CvTypeRefuse: status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+    CvTropGros: status.HTTP_413_CONTENT_TOO_LARGE,
+    CvSansTexte: status.HTTP_422_UNPROCESSABLE_CONTENT,
+    CvIllisible: status.HTTP_422_UNPROCESSABLE_CONTENT,
+    TropDAnalyses: status.HTTP_429_TOO_MANY_REQUESTS,
+    AnalyseIndisponible: status.HTTP_503_SERVICE_UNAVAILABLE,
+    ProfilAbsent: status.HTTP_409_CONFLICT,
 }
 
 

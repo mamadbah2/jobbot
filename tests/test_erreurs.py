@@ -34,3 +34,24 @@ def test_trop_de_demandes_porte_le_delai() -> None:
     exc = erreurs.TropDeDemandes(attendre_secondes=42)
     assert exc.attendre_secondes == 42
     assert exc.code == "trop_de_demandes"
+
+
+def test_les_erreurs_du_cv_ont_des_codes_stables() -> None:
+    """Le client web traduit ces codes en phrases : les renommer casse l'écran."""
+    from src.core.erreurs import (
+        AnalyseIndisponible,
+        CvIllisible,
+        CvSansTexte,
+        CvTropGros,
+        CvTypeRefuse,
+        ProfilAbsent,
+        TropDAnalyses,
+    )
+
+    assert CvTypeRefuse.code == "cv_type_refuse"
+    assert CvTropGros.code == "cv_trop_gros"
+    assert CvSansTexte.code == "cv_sans_texte"
+    assert CvIllisible.code == "cv_illisible"
+    assert TropDAnalyses.code == "trop_d_analyses"
+    assert AnalyseIndisponible.code == "analyse_indisponible"
+    assert ProfilAbsent.code == "profil_absent"

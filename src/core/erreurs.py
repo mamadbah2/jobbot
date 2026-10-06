@@ -18,6 +18,13 @@ __all__ = [
     "JetonInvalide",
     "NomInvalide",
     "EnvoiImpossible",
+    "CvTypeRefuse",
+    "CvTropGros",
+    "CvSansTexte",
+    "CvIllisible",
+    "TropDAnalyses",
+    "AnalyseIndisponible",
+    "ProfilAbsent",
 ]
 
 
@@ -75,3 +82,50 @@ class EnvoiImpossible(ErreurMetier):
     """Le fournisseur d'email a échoué. L'utilisateur peut réessayer."""
 
     code = "envoi_impossible"
+
+
+class CvTypeRefuse(ErreurMetier):
+    """Le fichier n'est ni un PDF, ni un DOCX, ni une image JPEG ou PNG."""
+
+    code = "cv_type_refuse"
+
+
+class CvTropGros(ErreurMetier):
+    code = "cv_trop_gros"
+
+
+class CvSansTexte(ErreurMetier):
+    """Document sans texte exploitable : PDF scanné, page blanche.
+
+    Levée AVANT tout appel au LLM : c'est le seul moment où l'on peut refuser
+    sans rien payer.
+    """
+
+    code = "cv_sans_texte"
+
+
+class CvIllisible(ErreurMetier):
+    """Fichier annoncé valide par ses octets de tête mais inexploitable :
+    PDF chiffré, archive tronquée, ZIP qui n'est pas un document Word."""
+
+    code = "cv_illisible"
+
+
+class TropDAnalyses(ErreurMetier):
+    """Plafond d'analyses du jour atteint. Distinct de `TropDeDemandes` :
+    l'utilisateur n'a rien fait d'abusif, il a simplement épuisé un quota de
+    coût, et le message à lui afficher n'est pas le même."""
+
+    code = "trop_d_analyses"
+
+
+class AnalyseIndisponible(ErreurMetier):
+    """DeepSeek est injoignable. Le quota n'est pas décompté (§9)."""
+
+    code = "analyse_indisponible"
+
+
+class ProfilAbsent(ErreurMetier):
+    """Correction demandée alors qu'aucun CV n'a jamais été déposé."""
+
+    code = "profil_absent"
