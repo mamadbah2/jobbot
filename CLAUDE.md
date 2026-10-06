@@ -378,11 +378,11 @@ Le quota de 25 est un **plafond de coût**, pas une limite arbitraire. Il doit �
 1. Adresse email → code à 6 chiffres → nom (le nom uniquement si le compte est nouveau)
 2. Upload du CV (PDF, DOCX ou photo) → parsing → **affichage du profil extrait pour validation** (l'utilisateur corrige en un tap)
 3. Choix des secteurs + région + type de contrat (boutons, pas de saisie libre)
+4. Première alerte envoyée immédiatement — **la valeur doit être visible avant toute demande de paiement**
 
 > **Les étapes 2 et 3 partent dans une seule soumission** depuis la Phase 3 : les corrections du
 > profil et les préférences sont enregistrées ensemble. Chaque étape de plus coûte des abandons
 > (§11) et un aller-retour payé en data ; les fusionner en épargne une.
-4. Première alerte envoyée immédiatement — **la valeur doit être visible avant toute demande de paiement**
 
 > **Par quel canal ?** Les alertes offres partaient par Telegram jusqu'au 2026-09-12 ; leur canal
 > de remplacement est **tranché depuis le 2026-09-14** (§14.9) : notifications push web d'abord,

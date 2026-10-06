@@ -113,8 +113,14 @@ class CvSansTexte(ErreurMetier):
 
 
 class CvIllisible(ErreurMetier):
-    """Fichier annoncé valide par ses octets de tête mais inexploitable :
-    PDF chiffré, archive tronquée, ZIP qui n'est pas un document Word."""
+    """Deux situations, même code parce que la sortie est la même (redéposer) :
+
+    1. fichier annoncé valide par ses octets de tête mais inexploitable — PDF
+       chiffré, archive tronquée, ZIP qui n'est pas un document Word ;
+    2. analyse menée à son terme mais dont la réponse reste illisible après
+       relance (`llm/cv_parser.py`), et qui a donc coûté de l'argent.
+
+    Le libellé du client web doit rester juste dans les deux cas."""
 
     code = "cv_illisible"
 

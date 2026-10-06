@@ -66,7 +66,15 @@ async def supprimer_mes_donnees(
     await session.commit()
     # L'image brute d'un CV en attente d'analyse : la donnée la plus sensible du
     # produit. Clé déterministe, donc un `DELETE` en O(1) (pas de `SCAN`).
-    await cache.delete(cle_image_cv(user_id))
+    #
+    # Le nettoyage vient APRÈS le commit, donc après le point de non-retour : un
+    # Redis injoignable ici ferait répondre 500 alors que le compte EST supprimé,
+    # et l'utilisateur croirait sa demande refusée. On journalise et on continue.
+    # L'image, elle, disparaît de toute façon à son TTL (10 minutes).
+    try:
+        await cache.delete(cle_image_cv(user_id))
+    except Exception as exc:  # noqa: BLE001 — nom du type seulement
+        log.error("suppression_image_cv_echouee", user_id=user_id, type_erreur=type(exc).__name__)
     effacer_cookie(response, settings)
     # L'identifiant seulement : l'adresse est une donnée personnelle, et on
     # vient précisément de promettre de l'effacer.

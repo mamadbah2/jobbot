@@ -358,9 +358,10 @@ async def _echec_sans_fuite(
 async def _marquer_echec(
     user_id: int, code: str, cout: Decimal | None = None, demarre_le: datetime | None = None
 ) -> None:
-    """`cout` : dollars déjà payés (deux appels après une relance ratée). Le
-    cas le plus coûteux est aussi celui où l'argent disparaîtrait sans trace.
-    Les tokens ne sont pas connus ici : seul le montant l'est.
+    """`cout` : dollars déjà payés quand l'analyse a échoué — deux appels après
+    une relance ratée, ou un appel facturé suivi d'une panne. Dans les deux cas,
+    c'est l'argent qui disparaîtrait sans trace. Les tokens ne sont pas connus
+    ici : seul le montant l'est.
 
     `demarre_le` : même garde optimiste que le succès — l'échec d'un ancien dépôt
     ne doit pas écraser l'analyse en cours d'un dépôt plus récent."""

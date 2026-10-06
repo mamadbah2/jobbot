@@ -40,9 +40,13 @@ async def autoriser_analyse_cv(
 async def liberer_analyse_cv(cache: CacheRedis, *, user_id: int, secret: str) -> None:
     """Rend la place prise par `autoriser_analyse_cv` (§9).
 
-    À n'appeler que quand RIEN n'a été payé : DeepSeek injoignable. Une analyse
-    qui a coûté de l'argent puis échoué (`CvIllisible` après relance) garde sa
-    place consommée.
+    À n'appeler que quand l'utilisateur n'a RIEN reçu : DeepSeek injoignable.
+    Une analyse qui lui a rendu un résultat inutilisable (`CvIllisible` après
+    relance) garde sa place consommée.
+
+    Rendre la place ne dit rien du coût : une première tentative facturée avant
+    la panne est consignée dans `usage_counters` quand même. Les deux décisions
+    sont indépendantes.
 
     Ne descend jamais sous zéro : si la clé du jour a expiré ou changé de jour
     entre le dépôt et l'échec, un `decr` aveugle créerait un compteur négatif,

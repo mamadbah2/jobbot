@@ -7,7 +7,6 @@ stocker des CV.
 from __future__ import annotations
 
 import asyncio
-import io
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
 
@@ -16,19 +15,14 @@ from fastapi.testclient import TestClient
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from src.config import get_settings
-from tests.conftest import FauxCache, FournisseurCourrielEspion, demander_code_verification
+from tests.conftest import (
+    FauxCache,
+    FournisseurCourrielEspion,
+    demander_code_verification,
+    docx_avec_texte,
+)
 
 ADRESSE = "suppression@jobbot-test.sn"
-
-
-def _docx(texte: str) -> bytes:
-    from docx import Document
-
-    doc = Document()
-    doc.add_paragraph(texte)
-    tampon = io.BytesIO()
-    doc.save(tampon)
-    return tampon.getvalue()
 
 
 def _connecter(client: TestClient, espion: FournisseurCourrielEspion) -> None:
@@ -49,10 +43,8 @@ def test_la_suppression_emporte_le_profil(
     client_auth: TestClient, fournisseur_courriel_espion: FournisseurCourrielEspion
 ) -> None:
     _connecter(client_auth, fournisseur_courriel_espion)
-    client_auth.post(
-        "/profil/cv",
-        files={"fichier": ("cv.docx", _docx("Awa Diop comptable Alpha SARL 2019. " * 20))},
-    )
+    cv = docx_avec_texte("Awa Diop comptable Alpha SARL 2019. " * 20)
+    client_auth.post("/profil/cv", files={"fichier": ("cv.docx", cv)})
     nom = get_settings().cookie_session_nom
     jeton = client_auth.cookies.get(nom)
     assert jeton
@@ -236,3 +228,28 @@ async def test_la_suppression_emporte_l_image_du_cv_en_attente(
     assert client_auth.delete("/moi").status_code == 204
 
     assert await faux_cache.get(cle) is None
+
+
+@pytest.mark.integration
+def test_un_redis_en_panne_ne_fait_pas_echouer_une_suppression_deja_faite(
+    client_auth: TestClient,
+    fournisseur_courriel_espion: FournisseurCourrielEspion,
+    faux_cache: FauxCache,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Le nettoyage de l'image vient APRÈS le commit : une panne de Redis à cet
+    instant ferait répondre 500 alors que le compte est bien supprimé, et
+    l'utilisateur croirait sa demande refusée. Même défaut que le commit tardif
+    corrigé plus tôt, de l'autre côté de la réponse."""
+
+    async def _casse(*names: str) -> int:
+        raise ConnectionError("redis injoignable")
+
+    _connecter(client_auth, fournisseur_courriel_espion)
+    faux_cache.delete = _casse  # type: ignore[method-assign]
+
+    assert client_auth.delete("/moi").status_code == 204
+    # L'échec ne disparaît pas pour autant : il est journalisé, sans message.
+    sortie = capsys.readouterr().out
+    assert "suppression_image_cv_echouee" in sortie
+    assert "redis injoignable" not in sortie
