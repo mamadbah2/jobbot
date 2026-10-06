@@ -31,8 +31,6 @@ export type Etape =
   | 'connexion_reussie'
   | 'deconnexion'
   | 'vue_profil_absent'
-  | 'vue_profil_en_attente'
-  | 'vue_profil_en_cours'
   | 'vue_profil_pret'
   | 'vue_profil_echec'
   | 'cv_depose'

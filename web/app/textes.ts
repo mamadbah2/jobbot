@@ -119,7 +119,10 @@ export const T = {
   titreSuppression: 'Supprimer mes données',
   aideSuppression:
     "Votre compte, votre CV et votre profil seront supprimés immédiatement. C'est définitif.",
-  boutonSupprimer: 'Supprimer définitivement mes données',
+  boutonSupprimer: 'Oui, supprimer définitivement',
+  annuler: 'Annuler',
+  donneesSupprimees: 'Vos données ont été supprimées.',
+  choisir: 'Choisir',
   champNomProfil: 'Votre nom',
   champTitre: 'Le poste que vous cherchez',
   champCompetences: 'Vos compétences, séparées par des virgules',

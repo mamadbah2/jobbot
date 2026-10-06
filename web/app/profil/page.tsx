@@ -32,12 +32,12 @@ export default async function PageProfil({
   const { erreur, redeposer } = await searchParams
   const message = texteErreur(erreur) ?? texteErreur(etat.erreur ?? undefined)
 
-  journaliser(`vue_profil_${etat.etat}`)
-
   // Rechargement par balise HTML : aucun JavaScript, donc ça marche même quand
   // le runtime Next n'arrive jamais (3G qui coupe), et l'analyse continue si
   // l'utilisateur ferme son navigateur.
   if (etat.etat === 'en_cours' || etat.etat === 'en_attente') {
+    // Pas de journal ici : la page se recharge toute les 5 s, huit « vues »
+    // pour une seule personne ruineraient la mesure d'abandon (§11).
     return (
       <main>
         <meta httpEquiv="refresh" content="5" />
@@ -50,6 +50,9 @@ export default async function PageProfil({
     )
   }
 
+  // `absent`, `pret` ou `echec` : ici seulement, une vue = une personne.
+  journaliser(`vue_profil_${etat.etat}`)
+
   if (etat.etat === 'pret' && etat.structured && !redeposer) {
     const s = etat.structured
     const texte = (cle: string): string => (typeof s[cle] === 'string' ? (s[cle] as string) : '')
@@ -61,6 +64,14 @@ export default async function PageProfil({
     const experiences = lignes('experiences')
     const formations = lignes('formations')
     const secteurs = liste('secteurs_vises')
+    // Ce que le formulaire ne sait pas afficher (secteur en texte libre
+    // extrait du CV, région hors liste) est montré et conservé : l'écraser
+    // en silence ferait perdre à l'utilisateur ce qu'il ne voit jamais.
+    const secteursHorsListe = secteurs.filter((x) => !SECTEURS.includes(x))
+    const mobilite = texte('mobilite')
+    const regions = mobilite && !REGIONS.includes(mobilite) ? [mobilite, ...REGIONS] : REGIONS
+    const typeContrat = texte('type_contrat')
+    const contrats = typeContrat && !CONTRATS.includes(typeContrat) ? [typeContrat, ...CONTRATS] : CONTRATS
 
     return (
       <main>
@@ -70,55 +81,6 @@ export default async function PageProfil({
         <h1>{T.titreValidation}</h1>
         <p>{T.aideValidation}</p>
         {message && <p className="erreur">{message}</p>}
-        <form action={enregistrerProfil}>
-          <label htmlFor="nom_complet">{T.champNomProfil}</label>
-          <input id="nom_complet" name="nom_complet" defaultValue={texte('nom_complet')} />
-
-          <label htmlFor="titre">{T.champTitre}</label>
-          <input id="titre" name="titre" defaultValue={texte('titre')} />
-
-          <label htmlFor="competences">{T.champCompetences}</label>
-          <input id="competences" name="competences" defaultValue={liste('competences').join(', ')} />
-
-          <label htmlFor="langues">{T.champLangues}</label>
-          <input id="langues" name="langues" defaultValue={liste('langues').join(', ')} />
-
-          <fieldset>
-            <legend>{T.legendeSecteurs}</legend>
-            {SECTEURS.map((secteur) => (
-              <label key={secteur}>
-                <input
-                  type="checkbox"
-                  name="secteurs"
-                  value={secteur}
-                  defaultChecked={secteurs.includes(secteur)}
-                />{' '}
-                {secteur}
-              </label>
-            ))}
-          </fieldset>
-
-          <label htmlFor="region">{T.champRegion}</label>
-          <select id="region" name="region" defaultValue={texte('mobilite')}>
-            {REGIONS.map((r) => (
-              <option key={r} value={r}>
-                {r}
-              </option>
-            ))}
-          </select>
-
-          <label htmlFor="contrat">{T.champContrat}</label>
-          <select id="contrat" name="contrat" defaultValue={texte('type_contrat')}>
-            {CONTRATS.map((c) => (
-              <option key={c} value={c}>
-                {c}
-              </option>
-            ))}
-          </select>
-
-          <button type="submit">{T.boutonValider}</button>
-        </form>
-
         <section className="offre">
           <h2>{T.titreLecture}</h2>
           {experiences.length === 0 && formations.length === 0 ? (
@@ -141,6 +103,58 @@ export default async function PageProfil({
             {T.siFaux} <a href="/profil?redeposer=1">{T.redeposerCv}</a>
           </p>
         </section>
+
+        <form action={enregistrerProfil}>
+          <label htmlFor="nom_complet">{T.champNomProfil}</label>
+          <input id="nom_complet" name="nom_complet" defaultValue={texte('nom_complet')} />
+
+          <label htmlFor="titre">{T.champTitre}</label>
+          <input id="titre" name="titre" defaultValue={texte('titre')} />
+
+          <label htmlFor="competences">{T.champCompetences}</label>
+          <input id="competences" name="competences" defaultValue={liste('competences').join(', ')} />
+
+          <label htmlFor="langues">{T.champLangues}</label>
+          <input id="langues" name="langues" defaultValue={liste('langues').join(', ')} />
+
+          <fieldset>
+            <legend>{T.legendeSecteurs}</legend>
+            {[...SECTEURS, ...secteursHorsListe].map((secteur) => (
+              <label key={secteur}>
+                <input
+                  type="checkbox"
+                  name="secteurs"
+                  value={secteur}
+                  defaultChecked={secteurs.includes(secteur)}
+                />{' '}
+                {secteur}
+              </label>
+            ))}
+          </fieldset>
+
+          <label htmlFor="region">{T.champRegion}</label>
+          <select id="region" name="region" defaultValue={mobilite}>
+            <option value="">{T.choisir}</option>
+            {regions.map((r) => (
+              <option key={r} value={r}>
+                {r}
+              </option>
+            ))}
+          </select>
+
+          <label htmlFor="contrat">{T.champContrat}</label>
+          <select id="contrat" name="contrat" defaultValue={typeContrat}>
+            <option value="">{T.choisir}</option>
+            {contrats.map((c) => (
+              <option key={c} value={c}>
+                {c}
+              </option>
+            ))}
+          </select>
+
+          <button type="submit">{T.boutonValider}</button>
+        </form>
+
       </main>
     )
   }

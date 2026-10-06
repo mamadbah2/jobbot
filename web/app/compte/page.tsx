@@ -3,7 +3,7 @@ import { redirect } from 'next/navigation'
 import { moi } from '../api-client'
 import { EcranPanne } from '../ecran-panne'
 import { etatLisible, T } from '../textes'
-import { seDeconnecter, supprimerMonCompte } from './actions'
+import { seDeconnecter } from './actions'
 
 export default async function PageCompte() {
   let utilisateur
@@ -38,13 +38,9 @@ export default async function PageCompte() {
       <form action={seDeconnecter}>
         <button type="submit">{T.boutonDeconnexion}</button>
       </form>
-      <section className="offre">
-        <h2>{T.titreSuppression}</h2>
-        <p className="meta">{T.aideSuppression}</p>
-        <form action={supprimerMonCompte}>
-          <button type="submit">{T.boutonSupprimer}</button>
-        </form>
-      </section>
+      <p className="issue-secours">
+        <a href="/compte/supprimer">{T.titreSuppression}</a>
+      </p>
     </main>
   )
 }
