@@ -7,25 +7,52 @@ import {
   COOKIE_BROUILLON,
   ErreurApi,
   attributsCookieBrouillon,
+  brouillonDepuisStructured,
+  differenceBrouillon,
   effacementCookieBrouillon,
   listeTropLongue,
   serialiserBrouillon,
   type BrouillonProfil,
 } from '../api-contrat'
-import { corrigerProfil, deposerCv } from '../api-client'
+import { corrigerProfil, deposerCv, profil } from '../api-client'
 import { codeConnu, journaliser } from '../journal'
+
+/** Le profil enregistré, qui sert de référence au brouillon. Un appel de plus,
+ *  mais UNIQUEMENT sur le chemin d'erreur, et il remplace l'envoi du profil
+ *  entier dans un cookie que le navigateur aurait jeté.
+ *
+ *  `null` si l'API ne répond pas : `differenceBrouillon` retombe alors sur le
+ *  profil complet. Une panne pendant un aller-retour d'erreur ne doit pas
+ *  ajouter une seconde panne. */
+async function reference(): Promise<BrouillonProfil | null> {
+  try {
+    const etat = await profil()
+    return etat?.structured ? brouillonDepuisStructured(etat.structured) : null
+  } catch {
+    return null
+  }
+}
 
 /** Conserve la saisie le temps d'un aller-retour d'erreur, ou l'oublie quand
  *  elle est enregistrée. Sans JavaScript, le `redirect` qui porte le message
  *  d'erreur recharge la page depuis la base : sans ce cookie, tout ce que
- *  l'utilisateur vient de taper disparaît avec lui. */
-async function conserver(donnees: BrouillonProfil): Promise<void> {
-  const valeur = serialiserBrouillon(donnees)
+ *  l'utilisateur vient de taper disparaît avec lui.
+ *
+ *  Rend `false` quand la saisie n'a VRAIMENT pas pu être conservée. L'appelant
+ *  doit alors le dire à l'utilisateur : lui rendre ses anciennes valeurs sans
+ *  un mot est exactement le défaut qu'on a payé une fois. */
+async function conserver(donnees: BrouillonProfil): Promise<boolean> {
+  const valeur = serialiserBrouillon(differenceBrouillon(donnees, await reference()))
   const magasin = await cookies()
-  // Trop gros pour un cookie : on l'oublie plutôt que d'en poser un que le
-  // navigateur jettera sans rien dire.
-  if (valeur) magasin.set(COOKIE_BROUILLON, valeur, attributsCookieBrouillon())
-  else magasin.delete(effacementCookieBrouillon())
+  // Trop gros pour un cookie même réduit aux changements : on l'oublie plutôt
+  // que d'en poser un que le navigateur jettera sans rien dire.
+  if (valeur) {
+    magasin.set(COOKIE_BROUILLON, valeur, attributsCookieBrouillon())
+    return true
+  }
+  magasin.delete(effacementCookieBrouillon())
+  journaliser('profil_brouillon_perdu')
+  return false
 }
 
 async function oublier(): Promise<void> {
@@ -87,9 +114,9 @@ export async function enregistrerProfil(formData: FormData): Promise<void> {
   // l'utilisateur n'a aucune action possible (revue finale, I-2).
   const trop = listeTropLongue(donnees)
   if (trop) {
-    await conserver(donnees)
+    const garde = await conserver(donnees)
     journaliser('profil_trop_long')
-    redirect(`/profil?trop=${trop.champ}&saisi=${trop.saisi}`)
+    redirect(`/profil?trop=${trop.champ}&saisi=${trop.saisi}${garde ? '' : '&brouillon=perdu'}`)
   }
 
   let echec: string | null = null
@@ -102,8 +129,10 @@ export async function enregistrerProfil(formData: FormData): Promise<void> {
 
   if (echec) {
     // La saisie survit aussi aux refus de l'API : c'est le même aller-retour.
-    await conserver(donnees)
-    redirect(`/profil?erreur=${encodeURIComponent(echec)}`)
+    const garde = await conserver(donnees)
+    redirect(
+      `/profil?erreur=${encodeURIComponent(echec)}${garde ? '' : '&brouillon=perdu'}`,
+    )
   }
   await oublier()
   journaliser('profil_valide')

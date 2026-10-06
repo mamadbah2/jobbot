@@ -134,6 +134,11 @@ export const T = {
   // L'analyse attend son tour : ne pas dire « nous lisons », ce serait faux.
   analyseEnAttente:
     "Nous avons bien reçu votre CV. Sa lecture commence dans un instant. Cette page se met à jour toute seule.",
+  // La saisie n'a pas tenu dans un cookie, même réduite à ce qui a changé. On
+  // le DIT : lui rendre ses anciennes valeurs sans un mot, c'est lui faire
+  // croire qu'il n'a rien tapé.
+  brouillonPerdu:
+    "Ce que vous veniez de taper était trop long pour être gardé. Les valeurs ci-dessous sont celles de votre profil enregistré : vérifiez-les avant d'enregistrer.",
   titreValidation: 'Vérifiez votre profil',
   aideValidation: "Corrigez ce qui est faux, puis choisissez ce que vous cherchez.",
   boutonValider: 'Enregistrer',

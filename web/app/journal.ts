@@ -36,6 +36,9 @@ export type Etape =
   | 'cv_depose'
   | 'cv_refuse'
   | 'profil_trop_long'
+  // La saisie n'a pas tenu dans un cookie, même réduite aux changements :
+  // l'utilisateur en est averti à l'écran, et on veut savoir si ça arrive.
+  | 'profil_brouillon_perdu'
   | 'profil_valide'
   | 'donnees_supprimees'
 

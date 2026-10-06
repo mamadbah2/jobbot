@@ -5,6 +5,8 @@ import { moi, profil } from '../api-client'
 import {
   COOKIE_BROUILLON,
   LIMITES_LISTES,
+  appliquerBrouillon,
+  brouillonDepuisStructured,
   lireBrouillon,
   listeTropLongue,
   type ChampListe,
@@ -19,7 +21,13 @@ type Ligne = Record<string, string | undefined>
 export default async function PageProfil({
   searchParams,
 }: {
-  searchParams: Promise<{ erreur?: string; redeposer?: string; trop?: string; saisi?: string }>
+  searchParams: Promise<{
+    erreur?: string
+    redeposer?: string
+    trop?: string
+    saisi?: string
+    brouillon?: string
+  }>
 }) {
   const panne = (
     <EcranPanne reessayerHref="/profil" retour={{ href: '/offres', libelle: T.lienOffres }} />
@@ -37,7 +45,10 @@ export default async function PageProfil({
   // chaque requête pour se faire refuser à chaque fois.
   if (!utilisateur || !etat) redirect('/connexion/expiree')
 
-  const { erreur, redeposer, trop, saisi } = await searchParams
+  const { erreur, redeposer, trop, saisi, brouillon: sortBrouillon } = await searchParams
+  // La saisie n'a pas pu être conservée : on le dit, au lieu de rendre les
+  // anciennes valeurs sans un mot.
+  const brouillonPerdu = sortBrouillon === 'perdu'
   // Une liste trop longue a son propre message, qui nomme la liste et le
   // nombre à retirer : le code générique ne dirait rien d'actionnable.
   const messageTrop =
@@ -76,29 +87,22 @@ export default async function PageProfil({
   // côté, et le lien « déposer un autre CV » reste la sortie.
   if ((etat.etat === 'pret' || etat.etat === 'echec') && etat.structured && !redeposer) {
     const s = etat.structured
-    const texte = (cle: string): string => (typeof s[cle] === 'string' ? (s[cle] as string) : '')
-    const liste = (cle: string): string[] =>
-      Array.isArray(s[cle])
-        ? (s[cle] as unknown[]).filter((v): v is string => typeof v === 'string')
-        : []
     const lignes = (cle: string): Ligne[] => (Array.isArray(s[cle]) ? (s[cle] as Ligne[]) : [])
     const experiences = lignes('experiences')
     const formations = lignes('formations')
 
     // La saisie d'une tentative refusée prime sur ce qui est enregistré : sans
-    // JavaScript, c'est la seule façon de ne pas la perdre au `redirect`. Un
-    // champ vidé par l'utilisateur reste vide — `brouillon` fait foi en bloc,
-    // jamais champ par champ, sinon une suppression volontaire serait annulée.
-    const brouillon = lireBrouillon((await cookies()).get(COOKIE_BROUILLON)?.value)
-    const valeurs = brouillon ?? {
-      nom_complet: texte('nom_complet'),
-      titre: texte('titre'),
-      competences: liste('competences'),
-      langues: liste('langues'),
-      secteurs_vises: liste('secteurs_vises'),
-      mobilite: texte('mobilite'),
-      type_contrat: texte('type_contrat'),
-    }
+    // JavaScript, c'est la seule façon de ne pas la perdre au `redirect`. Le
+    // cookie ne porte QUE les champs modifiés (un profil entier n'entre pas
+    // dans les 4 Ko d'un cookie dès 60 compétences) ; les autres se recollent
+    // ici depuis le profil enregistré. Un champ vidé par l'utilisateur diffère
+    // de l'enregistré, donc il est dans le brouillon et reste vide : une
+    // suppression volontaire n'est jamais annulée.
+    const enregistre = brouillonDepuisStructured(s)
+    const valeurs = appliquerBrouillon(
+      lireBrouillon((await cookies()).get(COOKIE_BROUILLON)?.value),
+      enregistre,
+    )
 
     const secteurs = valeurs.secteurs_vises
     // Ce que le formulaire ne sait pas afficher (secteur en texte libre
@@ -129,6 +133,9 @@ export default async function PageProfil({
         <h1>{T.titreValidation}</h1>
         <p>{T.aideValidation}</p>
         {avertissement && <p className="erreur">{avertissement}</p>}
+        {/* En plus de l'avertissement, jamais à sa place : l'utilisateur doit
+            savoir À LA FOIS quoi corriger et que sa saisie n'a pas été gardée. */}
+        {brouillonPerdu && <p className="erreur">{T.brouillonPerdu}</p>}
         <section className="offre">
           <h2>{T.titreLecture}</h2>
           {experiences.length === 0 && formations.length === 0 ? (

@@ -174,9 +174,88 @@ export const COOKIE_BROUILLON = 'jobbot_profil_brouillon'
 
 /** Au-delà, le cookie est abandonné : un navigateur en jette un de plus de 4 Ko,
  *  et un cookie jeté en silence ferait perdre la saisie SANS que personne ne le
- *  voie. Mieux vaut renoncer en le sachant — l'écran affiche alors le profil
- *  enregistré, et le message qui dit quoi corriger reste là. */
+ *  voie. On ne peut donc pas relever cette borne — c'est le navigateur qui la
+ *  fixe, pas nous. Quand elle est quand même atteinte, l'écran le DIT
+ *  (`T.brouillonPerdu`) au lieu de rendre les anciennes valeurs sans un mot. */
 export const TAILLE_MAX_BROUILLON = 3500
+
+const CHAMPS_TEXTE = ['nom_complet', 'titre', 'mobilite', 'type_contrat'] as const
+const CHAMPS_LISTE = ['competences', 'langues', 'secteurs_vises'] as const
+
+/** Ce que le cookie transporte : SEULEMENT les champs que l'utilisateur a
+ *  changés par rapport au profil enregistré. Une clé absente veut dire « rien
+ *  touché, le serveur a déjà la bonne valeur » ; une clé présente fait foi,
+ *  même vide. */
+export type BrouillonPartiel = Partial<BrouillonProfil>
+
+/** Le profil enregistré, ramené à la forme du formulaire. Sert de référence au
+ *  brouillon : c'est la valeur à laquelle on compare, et celle qu'on recolle. */
+export function brouillonDepuisStructured(
+  structured: Record<string, unknown> | null,
+): BrouillonProfil {
+  const s = structured ?? {}
+  const texte = (cle: string): string | null => (typeof s[cle] === 'string' ? s[cle] : null)
+  const liste = (cle: string): string[] =>
+    Array.isArray(s[cle]) ? (s[cle] as unknown[]).filter((v): v is string => typeof v === 'string') : []
+  return {
+    nom_complet: texte('nom_complet'),
+    titre: texte('titre'),
+    competences: liste('competences'),
+    langues: liste('langues'),
+    secteurs_vises: liste('secteurs_vises'),
+    mobilite: texte('mobilite'),
+    type_contrat: texte('type_contrat'),
+  }
+}
+
+/** Ce qui a VRAIMENT changé, et rien d'autre.
+ *
+ *  Le cookie portait jusqu'ici le profil entier : 60 compétences aux libellés
+ *  réalistes (« Gestion administrative et financière » fait 36 signes)
+ *  franchissent les 3,5 Ko à elles seules, et le brouillon était alors jeté —
+ *  dans le scénario MÊME qu'il devait couvrir, puisque le message qui déclenche
+ *  l'aller-retour est « vous avez 60 compétences, retirez-en 10 ». L'utilisateur
+ *  corrigeait son nom, soumettait, et retrouvait le nom d'avant.
+ *
+ *  La correction d'un champ simple ne pèse plus que quelques dizaines d'octets :
+ *  le reste, le serveur l'a déjà. Un champ vidé volontairement DIFFÈRE de la
+ *  référence, donc il entre dans le brouillon et la suppression tient — c'est ce
+ *  que l'écran appelait « le brouillon fait foi en bloc », et c'est conservé,
+ *  champ par champ cette fois.
+ *
+ *  Sans référence (profil illisible, API injoignable), tout est considéré comme
+ *  changé : on retombe sur l'ancien comportement, borne comprise. */
+export function differenceBrouillon(
+  saisi: BrouillonProfil,
+  reference: BrouillonProfil | null,
+): BrouillonPartiel {
+  if (reference === null) return { ...saisi }
+  const diff: BrouillonPartiel = {}
+  for (const champ of CHAMPS_TEXTE) {
+    if (saisi[champ] !== reference[champ]) diff[champ] = saisi[champ]
+  }
+  for (const champ of CHAMPS_LISTE) {
+    const a = saisi[champ]
+    const b = reference[champ]
+    if (a.length !== b.length || a.some((v, i) => v !== b[i])) diff[champ] = a
+  }
+  return diff
+}
+
+/** Recolle le brouillon sur le profil enregistré. Un champ absent du brouillon
+ *  reprend la valeur enregistrée — qui est, par construction, celle que
+ *  l'utilisateur avait sous les yeux.
+ *
+ *  Prix assumé : si une analyse de fond se termine entre la soumission et le
+ *  rechargement, les champs non modifiés suivent le NOUVEAU profil. C'est
+ *  préférable à l'inverse — l'ancien instantané complet aurait masqué en silence
+ *  l'analyse que l'utilisateur venait de demander. */
+export function appliquerBrouillon(
+  brouillon: BrouillonPartiel | null,
+  reference: BrouillonProfil,
+): BrouillonProfil {
+  return brouillon === null ? reference : { ...reference, ...brouillon }
+}
 
 /** La saisie en cours, conservée le temps d'un aller-retour d'erreur — même
  *  mécanisme que `COOKIE_ADRESSE` : sans JavaScript, un `redirect` perd ce qui a
@@ -187,30 +266,38 @@ export const TAILLE_MAX_BROUILLON = 3500
  *  la décoder. Du JSON posé tel quel revient donc percent-encodé et illisible —
  *  constaté en vrai, le brouillon ne se rappliquait jamais. Base64url n'emploie
  *  aucun caractère qu'`encodeURIComponent` toucherait : ce qui est écrit est
- *  exactement ce qui revient, et la taille mesurée ici est celle du cookie. */
-export function serialiserBrouillon(donnees: BrouillonProfil): string | null {
+ *  exactement ce qui revient, et la taille mesurée ici est celle du cookie.
+ *
+ *  `null` = « ça ne tient pas dans un cookie ». L'appelant DOIT alors le dire à
+ *  l'utilisateur : c'est la perte silencieuse qu'on a payée une fois. */
+export function serialiserBrouillon(donnees: BrouillonPartiel): string | null {
   const encode = Buffer.from(JSON.stringify(donnees), 'utf8').toString('base64url')
   return encode.length > TAILLE_MAX_BROUILLON ? null : encode
 }
 
-export function lireBrouillon(valeur: string | undefined): BrouillonProfil | null {
+export function lireBrouillon(valeur: string | undefined): BrouillonPartiel | null {
   if (!valeur) return null
   try {
-    const brut = JSON.parse(
-      Buffer.from(valeur, 'base64url').toString('utf8'),
-    ) as Partial<BrouillonProfil>
-    const liste = (v: unknown): string[] =>
-      Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : []
-    const texte = (v: unknown): string | null => (typeof v === 'string' ? v : null)
-    return {
-      nom_complet: texte(brut.nom_complet),
-      titre: texte(brut.titre),
-      competences: liste(brut.competences),
-      langues: liste(brut.langues),
-      secteurs_vises: liste(brut.secteurs_vises),
-      mobilite: texte(brut.mobilite),
-      type_contrat: texte(brut.type_contrat),
+    const brut = JSON.parse(Buffer.from(valeur, 'base64url').toString('utf8')) as Record<
+      string,
+      unknown
+    >
+    if (brut === null || typeof brut !== 'object' || Array.isArray(brut)) return null
+    const partiel: BrouillonPartiel = {}
+    // Clé ABSENTE et clé à `null` ne veulent pas dire la même chose : l'une
+    // signifie « non modifié », l'autre « vidé exprès ». On ne parcourt donc
+    // que les clés réellement présentes.
+    for (const champ of CHAMPS_TEXTE) {
+      if (champ in brut) partiel[champ] = typeof brut[champ] === 'string' ? brut[champ] : null
     }
+    for (const champ of CHAMPS_LISTE) {
+      if (champ in brut) {
+        partiel[champ] = Array.isArray(brut[champ])
+          ? (brut[champ] as unknown[]).filter((x): x is string => typeof x === 'string')
+          : []
+      }
+    }
+    return partiel
   } catch {
     // Cookie tronqué ou trafiqué : on repart du profil enregistré plutôt que
     // de casser l'écran.
