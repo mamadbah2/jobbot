@@ -14,10 +14,9 @@ corps est inexploitable : PDF chiffré, archive tronquée, ZIP sans document).
 from __future__ import annotations
 
 import io
-import zipfile
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Literal
+from typing import Any, Literal
 
 from src.core.erreurs import CvIllisible, CvSansTexte, CvTypeRefuse
 
@@ -57,7 +56,28 @@ def _lire_docx(contenu: bytes) -> str:
     from docx import Document
 
     document = Document(io.BytesIO(contenu))
-    return "\n".join(p.text for p in document.paragraphs)
+    morceaux = _textes_conteneur(document)
+    # En-têtes et pieds de page : nom et coordonnées s'y trouvent souvent.
+    for section in document.sections:
+        morceaux += _textes_conteneur(section.header)
+        morceaux += _textes_conteneur(section.footer)
+    return "\n".join(morceaux)
+
+
+def _textes_conteneur(conteneur: Any) -> list[str]:
+    """Paragraphes puis tableaux d'un conteneur (document, en-tête, cellule).
+
+    `document.paragraphs` ignore les tableaux, or la mise en page d'un CV en
+    colonnes passe couramment par un tableau : le lire à moitié ferait refuser
+    à tort un fichier plein de texte. Une cellule peut contenir un tableau,
+    d'où la récursion. Les zones de texte flottantes ne sont pas lues.
+    """
+    textes = [p.text for p in conteneur.paragraphs]
+    for tableau in conteneur.tables:
+        for ligne in tableau.rows:
+            for cellule in ligne.cells:
+                textes += _textes_conteneur(cellule)
+    return textes
 
 
 @dataclass(frozen=True, slots=True)
@@ -95,21 +115,26 @@ def extraire_texte(
     lecteurs = lecteurs or LECTEURS_REELS
     lecteur = lecteurs.pdf if type_cv == "pdf" else lecteurs.docx
 
+    lecture_echouee = False
+    texte = ""
     try:
         texte = lecteur(contenu)
     except (CvSansTexte, CvIllisible):
         raise
-    except (zipfile.BadZipFile, KeyError, ValueError, OSError):
-        # `raise ... from None` et AUCUN détail recopié : le message d'une
-        # bibliothèque de lecture peut contenir un fragment du document, et une
-        # alerte admin recopie tout son contexte par le réseau (§7).
-        raise CvIllisible from None
     except Exception:
-        # Une bibliothèque de lecture peut lever n'importe quoi sur un fichier
-        # malformé. Un 500 ici serait une porte ouverte : tout échec de lecture
-        # est un refus de lecture, pas une panne du service.
-        raise CvIllisible from None
+        # Une bibliothèque de lecture lève n'importe quoi sur un fichier
+        # malformé (BadZipFile, KeyError, ValueError, OSError, erreurs de
+        # pdfminer...) : tout échec de lecture est un refus, pas une panne.
+        # On ne fait que lever un drapeau ICI : `raise` dans le bloc laisserait
+        # l'exception d'origine, et son message, dans `__context__` même avec
+        # `from None`. Le message peut contenir un fragment du CV, et une
+        # alerte admin recopie tout son contexte par le réseau (§7).
+        lecture_echouee = True
+    if lecture_echouee:
+        raise CvIllisible
 
-    if len(texte.replace(" ", "").strip()) < minimum:
+    # `split()` coupe sur tous les blancs (sauts de ligne, tabulations), pas
+    # seulement l'espace : un scan rend surtout des retours à la ligne.
+    if len("".join(texte.split())) < minimum:
         raise CvSansTexte
     return texte

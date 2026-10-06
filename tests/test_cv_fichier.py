@@ -8,6 +8,7 @@ maintenir dans le dépôt, et les cas limites sont reproductibles.
 from __future__ import annotations
 
 import io
+import traceback
 import zipfile
 
 import pytest
@@ -123,3 +124,47 @@ def test_le_message_dexception_ne_porte_jamais_de_contenu_de_cv() -> None:
         )
     assert secret not in str(capture.value)
     assert secret not in repr(capture.value)
+    # `from None` masque l'affichage mais laisse l'exception d'origine dans
+    # `__context__` si on lève dans le bloc `except` : on vérifie la chaîne.
+    assert capture.value.__context__ is None
+    assert capture.value.__cause__ is None
+    assert secret not in "".join(traceback.format_exception(capture.value))
+
+
+def test_le_seuil_ignore_tous_les_blancs() -> None:
+    """Cas discriminant : longueur brute au-dessus du minimum, compte utile en
+    dessous. Un scan rend surtout des sauts de ligne et des tabulations."""
+    texte = "a" + "\n" * 10 + "\t" * 5 + " " * 5 + "b"
+    assert len(texte) > 8
+    with pytest.raises(CvSansTexte):
+        extraire_texte(
+            b"%PDF",
+            "pdf",
+            minimum=8,
+            lecteurs=Lecteurs(pdf=lambda _: texte, docx=lambda _: ""),
+        )
+
+
+def test_borne_exacte_du_seuil() -> None:
+    def avec(texte: str) -> Lecteurs:
+        return Lecteurs(pdf=lambda _: texte, docx=lambda _: "")
+
+    assert extraire_texte(b"%PDF", "pdf", minimum=5, lecteurs=avec("ab cd\ne")) == "ab cd\ne"
+    with pytest.raises(CvSansTexte):
+        extraire_texte(b"%PDF", "pdf", minimum=5, lecteurs=avec("ab c\nd"))
+
+
+def test_un_docx_mis_en_page_en_tableau_est_lu() -> None:
+    """Colonnes par tableau : courant dans les CV. Tableaux imbriqués inclus."""
+    from docx import Document
+
+    doc = Document()
+    tableau = doc.add_table(rows=1, cols=2)
+    tableau.cell(0, 0).text = "Awa Diop comptable huit ans d'experience"
+    interne = tableau.cell(0, 1).add_table(rows=1, cols=1)
+    interne.cell(0, 0).text = "Competences Sage Excel fiscalite"
+    tampon = io.BytesIO()
+    doc.save(tampon)
+    texte = extraire_texte(tampon.getvalue(), "docx", minimum=50)
+    assert "Awa Diop" in texte
+    assert "Sage Excel" in texte
