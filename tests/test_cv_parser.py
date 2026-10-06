@@ -16,7 +16,7 @@ from structlog.testing import capture_logs
 
 from src.core.erreurs import CvIllisible
 from src.llm.client import CoutAppel
-from src.llm.cv_parser import VERSION_PROMPT_CV, CvIllisibleFacture, analyser_cv
+from src.llm.cv_parser import VERSION_PROMPT_CV, analyser_cv
 from src.llm.prompts import TEMPERATURE_CV
 
 COUT = CoutAppel(0, 100, 50, Decimal("0.0001"))
@@ -187,10 +187,9 @@ async def test_la_validation_descend_dans_les_elements(champ: str, valeur: objec
 
 async def test_le_cout_des_deux_appels_est_porte_par_lechec() -> None:
     """Deux appels payés ne doivent pas disparaître quand on abandonne."""
-    with pytest.raises(CvIllisibleFacture) as info:
+    with pytest.raises(CvIllisible) as info:
         await analyser_cv(texte="x", appeler=_appel("pas du json"))
-    assert info.value.cout.cout_usd == Decimal("0.0002")
-    assert info.value.cout.tokens_sortie == 100
+    assert info.value.cout == Decimal("0.0002")
 
 
 @pytest.mark.parametrize(
@@ -212,9 +211,10 @@ async def _jamais_appele(messages: Any, **_: Any) -> tuple[str, CoutAppel]:
     raise AssertionError("un appel payant a été fait sur une entrée inutilisable")
 
 
-async def test_refuse_avant_dappeler_sans_texte_ni_image() -> None:
+@pytest.mark.parametrize("texte", [None, "", "   \n\t "])
+async def test_refuse_avant_dappeler_sans_texte_ni_image(texte: str | None) -> None:
     with pytest.raises(ValueError):
-        await analyser_cv(appeler=_jamais_appele)
+        await analyser_cv(texte=texte, appeler=_jamais_appele)
 
 
 async def test_refuse_avant_dappeler_une_image_sans_type() -> None:

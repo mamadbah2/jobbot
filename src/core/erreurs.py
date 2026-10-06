@@ -7,6 +7,8 @@ apparaître ici.
 
 from __future__ import annotations
 
+from decimal import Decimal
+
 __all__ = [
     "ErreurMetier",
     "AdresseInvalide",
@@ -109,6 +111,13 @@ class CvIllisible(ErreurMetier):
     PDF chiffré, archive tronquée, ZIP qui n'est pas un document Word."""
 
     code = "cv_illisible"
+
+    def __init__(self, cout: Decimal | None = None) -> None:
+        super().__init__(self.code)
+        # Dollars déjà dépensés quand l'analyse abandonne après relance : deux
+        # appels payés ne doivent pas disparaître du suivi de marge. Un attribut
+        # et non une sous-classe : le statut HTTP se résout par type exact.
+        self.cout = cout
 
 
 class TropDAnalyses(ErreurMetier):

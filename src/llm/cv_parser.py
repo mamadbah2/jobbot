@@ -20,7 +20,7 @@ from src.logging_setup import get_logger
 
 log = get_logger(__name__)
 
-__all__ = ["CvIllisibleFacture", "VERSION_PROMPT_CV", "analyser_cv"]
+__all__ = ["VERSION_PROMPT_CV", "analyser_cv"]
 
 Appelant = Callable[..., Awaitable[tuple[str, CoutAppel]]]
 
@@ -34,18 +34,6 @@ _CHAINES_OPTIONNELLES = (
     "mobilite",
     "pretention_salariale",
 )
-
-
-class CvIllisibleFacture(CvIllisible):
-    """`CvIllisible` qui porte ce que les appels ont coûté.
-
-    Deux appels ont été payés avant l'abandon : sans le montant, le cas le plus
-    coûteux ne laisserait aucune trace dans le suivi de marge. Aucun contenu.
-    """
-
-    def __init__(self, cout: CoutAppel) -> None:
-        super().__init__()
-        self.cout = cout
 
 
 def _nettoyer(brut: str) -> str:
@@ -149,7 +137,9 @@ async def analyser_cv(
     payant si l'entrée est inutilisable : ni texte ni image, image sans type, ou
     `modele` (quand il est donné) qui ne lit pas les images.
     """
-    if texte is None and image is None:
+    # Un texte vide ou fait d'espaces vaut « absent » : l'appel serait payé
+    # pour un message sans contenu.
+    if not (texte and texte.strip()) and image is None:
         raise ValueError("ni texte ni image : l'appel serait payé pour rien")
     if image is not None:
         if not type_image:
@@ -192,4 +182,4 @@ async def analyser_cv(
     )
     # Levée hors de tout `except` : `__context__` reste vide, donc aucune trace
     # de la réponse (qui porte le CV) dans la chaîne d'exceptions.
-    raise CvIllisibleFacture(total)
+    raise CvIllisible(total.cout_usd)
