@@ -87,6 +87,34 @@ async def test_check_contraint_statut_applique(postgres_url: str) -> None:
         await engine.dispose()
 
 
+@pytest.mark.integration
+async def test_check_contrainte_parse_etat_refuse_une_valeur_inconnue(postgres_url: str) -> None:
+    """`ck_profiles_parse_etat` doit rejeter un état hors liste.
+
+    La transaction n'est jamais validée : l'utilisateur de test disparaît au
+    rollback, rien ne reste en base.
+    """
+    engine = create_async_engine(postgres_url)
+    try:
+        async with engine.begin() as conn:
+            user_id = (
+                await conn.execute(
+                    text(
+                        "INSERT INTO users (email, token_version, language, state) "
+                        "VALUES (:email, 0, 'fr', 'onboarding') RETURNING id"
+                    ),
+                    {"email": "parse-etat@jobbot-test.sn"},
+                )
+            ).scalar_one()
+            with pytest.raises(Exception, match="ck_profiles_parse_etat|check constraint"):
+                await conn.execute(
+                    text("INSERT INTO profiles (user_id, parse_etat) VALUES (:uid, 'inconnu')"),
+                    {"uid": user_id},
+                )
+    finally:
+        await engine.dispose()
+
+
 def test_metadata_couvre_les_tables_attendues() -> None:
     """Contrôle hors base : les modèles déclarent bien les 7 tables du §5."""
     assert set(Base.metadata.tables) >= TABLES_ATTENDUES
