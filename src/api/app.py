@@ -10,7 +10,8 @@ from __future__ import annotations
 from fastapi import FastAPI, Request, status
 from fastapi.responses import JSONResponse
 
-from src.api.routers import auth, moi, offres, sante
+from src.api.routers import auth, moi, offres, profil, sante
+from src.config import get_settings
 from src.core.erreurs import (
     AdresseInvalide,
     AnalyseIndisponible,
@@ -37,9 +38,13 @@ log = get_logger(__name__)
 # Les bornes des schémas pydantic n'agissent qu'après le parsing complet du
 # corps : sur un endpoint public non authentifié, ça laisse n'importe qui
 # faire lire des mégaoctets au serveur avant tout rejet. 64 Ko est très large
-# pour du JSON d'authentification ; l'upload de CV de la Phase 3 aura sa
-# propre limite, plus haute, propre à sa route.
+# pour du JSON d'authentification ; l'upload de CV a sa propre limite, plus
+# haute, propre à sa route.
 TAILLE_CORPS_MAX = 64 * 1024
+# L'enveloppe multipart (frontières, en-têtes de partie) s'ajoute au fichier :
+# sans marge, un fichier pile à la limite serait refusé par le middleware.
+MARGE_MULTIPART = 64 * 1024
+ROUTE_CV = "/profil/cv"
 
 # Chaque erreur métier a un statut HTTP, et un seul. Le défaut est 400 :
 # une erreur non listée est une faute de saisie, pas une panne serveur.
@@ -122,13 +127,23 @@ def create_app() -> FastAPI:
                     status_code=status.HTTP_411_LENGTH_REQUIRED,
                     content={"erreur": "longueur_requise"},
                 )
+            # `/profil/cv` porte un fichier : sa borne est CV_TAILLE_MAX_MO.
+            # Le plafond global de 64 Ko reste la règle pour tout le reste.
+            est_cv = request.url.path == ROUTE_CV
+            plafond = (
+                get_settings().cv_taille_max_octets + MARGE_MULTIPART
+                if est_cv
+                else TAILLE_CORPS_MAX
+            )
             try:
-                if int(longueur) > TAILLE_CORPS_MAX:
+                if int(longueur) > plafond:
                     raise ValueError
             except ValueError:
+                # Le code propre à la route : le client web a un texte pour
+                # `cv_trop_gros`, pas pour `corps_trop_grand`.
                 return JSONResponse(
                     status_code=status.HTTP_413_CONTENT_TOO_LARGE,
-                    content={"erreur": "corps_trop_grand"},
+                    content={"erreur": "cv_trop_gros" if est_cv else "corps_trop_grand"},
                 )
         return await appeler_suite(request)
 
@@ -136,4 +151,5 @@ def create_app() -> FastAPI:
     app.include_router(auth.router)
     app.include_router(moi.router)
     app.include_router(offres.router)
+    app.include_router(profil.router)
     return app

@@ -60,14 +60,14 @@ class FauxCache:
     """
 
     def __init__(self) -> None:
-        self.valeurs: dict[str, str] = {}
+        self.valeurs: dict[str, Any] = {}
         self.ttl: dict[str, int] = {}
 
     async def get(self, name: str) -> str | None:
         return self.valeurs.get(name)
 
     async def set(
-        self, name: str, value: str, *, ex: int | None = None, nx: bool = False
+        self, name: str, value: str | bytes, *, ex: int | None = None, nx: bool = False
     ) -> bool:
         if nx and name in self.valeurs:
             return False
@@ -200,6 +200,16 @@ def demander_code_verification(
     """Déclenche `/auth/code/demande` et renvoie le code intercepté par l'espion."""
     client.post("/auth/code/demande", json={"email": adresse})
     return espion.envois[-1][1]
+
+
+@pytest_asyncio.fixture
+async def base_profils_test(
+    base_utilisateurs_test: async_sessionmaker[AsyncSession],
+) -> AsyncIterator[async_sessionmaker[AsyncSession]]:
+    """`profiles` est purgée par la cascade de `users` (`ondelete="CASCADE"`),
+    que `base_utilisateurs_test` déclenche déjà sur `%@jobbot-test.sn`.
+    Ce fixture n'existe que pour rendre la dépendance explicite."""
+    yield base_utilisateurs_test
 
 
 SOURCE_TEST = "jobbot-test"
