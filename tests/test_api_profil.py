@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import io
 from collections.abc import AsyncIterator
 from typing import Any
 
@@ -10,20 +9,15 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from tests.conftest import FournisseurCourrielEspion, demander_code_verification
+from tests.conftest import (
+    FournisseurCourrielEspion,
+    Harnais,
+    demander_code_verification,
+    docx_avec_texte,
+)
 
 ADRESSE = "profil@jobbot-test.sn"
 JPEG = b"\xff\xd8\xff\xe0" + b"\x00" * 128
-
-
-def _docx(texte: str) -> bytes:
-    from docx import Document
-
-    doc = Document()
-    doc.add_paragraph(texte)
-    tampon = io.BytesIO()
-    doc.save(tampon)
-    return tampon.getvalue()
 
 
 def _connecter(client: TestClient, espion: FournisseurCourrielEspion) -> None:
@@ -67,7 +61,7 @@ def test_un_document_sans_texte_est_refuse_sans_appel_llm(
 ) -> None:
     """Le cas du PDF scanné : refusé dans la requête, sans rien payer."""
     _connecter(client_auth, fournisseur_courriel_espion)
-    r = client_auth.post("/profil/cv", files={"fichier": ("cv.docx", _docx("abc"))})
+    r = client_auth.post("/profil/cv", files={"fichier": ("cv.docx", docx_avec_texte("abc"))})
     assert r.status_code == 422
     assert r.json()["erreur"] == "cv_sans_texte"
 
@@ -92,7 +86,7 @@ def test_un_depot_valide_passe_en_attente_et_rend_202(
     `en_attente` et non `en_cours` : rien n'est en cours tant que la tâche de
     fond n'a pas obtenu une place (plafond de simultanéité, I-1)."""
     _connecter(client_auth, fournisseur_courriel_espion)
-    contenu = _docx("Awa Diop comptable chez Alpha SARL depuis 2019. " * 20)
+    contenu = docx_avec_texte("Awa Diop comptable chez Alpha SARL depuis 2019. " * 20)
     r = client_auth.post("/profil/cv", files={"fichier": ("cv.docx", contenu)})
     assert r.status_code == 202
     assert r.json()["etat"] == "en_attente"
@@ -103,7 +97,7 @@ def test_le_plafond_journalier_sapplique(
     client_auth: TestClient, fournisseur_courriel_espion: FournisseurCourrielEspion
 ) -> None:
     _connecter(client_auth, fournisseur_courriel_espion)
-    contenu = _docx("Awa Diop comptable chez Alpha SARL depuis 2019. " * 20)
+    contenu = docx_avec_texte("Awa Diop comptable chez Alpha SARL depuis 2019. " * 20)
     codes = [
         client_auth.post("/profil/cv", files={"fichier": ("cv.docx", contenu)}).status_code
         for _ in range(7)
@@ -195,88 +189,6 @@ async def test_un_echec_apres_relance_consigne_son_cout(
     assert ligne.cost_usd == Decimal("0.004")
 
 
-# --- Harnais de la tâche de fond -------------------------------------------
-#
-# `client_auth` remplace `deps.cache_redis` par un `FauxCache`, mais la tâche de
-# fond ouvre SON client. Sans ce harnais, l'image écrite par la route n'est
-# jamais là où la tâche la cherche : tout le chemin photo restait non vérifié.
-
-
-class _ClientPartage:
-    """Client de la tâche de fond, branché sur le MÊME `FauxCache` que la route."""
-
-    def __init__(self, cache: Any) -> None:
-        self._cache = cache
-        self.ttl_vus: dict[str, int | None] = {}
-
-    async def get(self, name: str) -> Any:
-        self.ttl_vus[name] = self._cache.ttl.get(name)
-        return await self._cache.get(name)
-
-    async def delete(self, *names: str) -> Any:
-        return await self._cache.delete(*names)
-
-    async def incr(self, name: str) -> int:
-        return await self._cache.incr(name)
-
-    async def decr(self, name: str) -> int:
-        return await self._cache.decr(name)
-
-    async def aclose(self) -> None:
-        return None
-
-
-class _Analyse:
-    """Double de `analyser_cv` : jamais de réseau, jamais de DeepSeek."""
-
-    def __init__(self) -> None:
-        self.appels: list[dict[str, Any]] = []
-        self.exception: Exception | None = None
-
-    async def __call__(self, **kw: Any) -> Any:
-        from decimal import Decimal
-
-        from src.llm.client import CoutAppel
-
-        self.appels.append(kw)
-        if self.exception is not None:
-            raise self.exception
-        profil = {"nom_complet": "Awa Diop", "competences": ["Excel"], "telephone": "770000000"}
-        return profil, "transcription", CoutAppel(10, 5, 3, Decimal("0.0001"))
-
-
-class _Harnais:
-    def __init__(self, analyse: _Analyse, client: _ClientPartage, cache: Any) -> None:
-        self.analyse = analyse
-        self.client = client
-        self.cache = cache
-
-
-@pytest.fixture
-def harnais(
-    monkeypatch: pytest.MonkeyPatch,
-    faux_cache: Any,
-    base_profils_test: async_sessionmaker[AsyncSession],
-) -> _Harnais:
-    from contextlib import asynccontextmanager
-
-    from src.api.routers import profil as routeur
-
-    analyse = _Analyse()
-    client = _ClientPartage(faux_cache)
-
-    @asynccontextmanager
-    async def _scope() -> AsyncIterator[AsyncSession]:
-        async with base_profils_test() as s:
-            yield s
-            await s.commit()
-
-    monkeypatch.setattr(routeur, "analyser_cv", analyse)
-    monkeypatch.setattr(routeur, "_ouvrir_redis", lambda: client)
-    monkeypatch.setattr(routeur, "session_scope", _scope)
-    return _Harnais(analyse, client, faux_cache)
-
-
 def _attendre_fin(client: TestClient) -> dict[str, Any]:
     import time
 
@@ -307,7 +219,7 @@ def _cles(cache: Any, prefixe: str) -> list[str]:
 def test_une_photo_traverse_redis_et_ressort_en_pret(
     client_auth: TestClient,
     fournisseur_courriel_espion: FournisseurCourrielEspion,
-    harnais: _Harnais,
+    harnais: Harnais,
 ) -> None:
     """Aller-retour de l'image : écrite par la route, lue en octets par la tâche,
     supprimée après lecture, avec son TTL posé au dépôt."""
@@ -329,7 +241,7 @@ def test_une_photo_traverse_redis_et_ressort_en_pret(
 async def test_une_image_dont_le_ttl_a_expire_echoue_sans_appel(
     client_auth: TestClient,
     fournisseur_courriel_espion: FournisseurCourrielEspion,
-    harnais: _Harnais,
+    harnais: Harnais,
     base_profils_test: async_sessionmaker[AsyncSession],
 ) -> None:
     from datetime import UTC, datetime
@@ -361,7 +273,7 @@ def _place_du_jour(cache: Any) -> int:
 def test_deepseek_injoignable_rend_la_place_du_quota(
     client_auth: TestClient,
     fournisseur_courriel_espion: FournisseurCourrielEspion,
-    harnais: _Harnais,
+    harnais: Harnais,
 ) -> None:
     from src.core.erreurs import AnalyseIndisponible
 
@@ -377,7 +289,7 @@ def test_deepseek_injoignable_rend_la_place_du_quota(
 def test_une_analyse_payee_puis_illisible_garde_sa_place(
     client_auth: TestClient,
     fournisseur_courriel_espion: FournisseurCourrielEspion,
-    harnais: _Harnais,
+    harnais: Harnais,
 ) -> None:
     from decimal import Decimal
 
@@ -395,7 +307,7 @@ def test_une_analyse_payee_puis_illisible_garde_sa_place(
 def test_le_code_dune_exception_tierce_nentre_pas_en_base(
     client_auth: TestClient,
     fournisseur_courriel_espion: FournisseurCourrielEspion,
-    harnais: _Harnais,
+    harnais: Harnais,
 ) -> None:
     """`openai.APIError` porte un `.code` : il ne doit pas finir dans `parse_erreur`."""
 
@@ -445,7 +357,7 @@ async def test_deux_insertions_simultanees_ne_laissent_quune_ligne(
 async def test_le_dernier_depot_gagne_meme_si_lancien_finit_apres(
     client_auth: TestClient,
     fournisseur_courriel_espion: FournisseurCourrielEspion,
-    harnais: _Harnais,
+    harnais: Harnais,
     base_profils_test: async_sessionmaker[AsyncSession],
 ) -> None:
     from datetime import UTC, datetime, timedelta
@@ -493,7 +405,7 @@ async def test_le_dernier_depot_gagne_meme_si_lancien_finit_apres(
 async def test_un_depot_arrive_pendant_lanalyse_nest_pas_ecrase_mais_le_cout_reste(
     client_auth: TestClient,
     fournisseur_courriel_espion: FournisseurCourrielEspion,
-    harnais: _Harnais,
+    harnais: Harnais,
     base_profils_test: async_sessionmaker[AsyncSession],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -546,7 +458,7 @@ async def test_un_depot_arrive_pendant_lanalyse_nest_pas_ecrase_mais_le_cout_res
 async def test_une_panne_de_base_ne_senchaine_pas_a_lerreur_dorigine(
     client_auth: TestClient,
     fournisseur_courriel_espion: FournisseurCourrielEspion,
-    harnais: _Harnais,
+    harnais: Harnais,
     base_profils_test: async_sessionmaker[AsyncSession],
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
@@ -568,6 +480,10 @@ async def test_une_panne_de_base_ne_senchaine_pas_a_lerreur_dorigine(
     uid = await _uid(base_profils_test)
     # Ne doit rien lever : la tâche n'a pas à mourir sur « never retrieved ».
     await routeur._analyser_en_arriere_plan(uid, "texte", None, None, datetime.now(UTC))
+    # `capsys` ne voit PAS ce que voit un collecteur de journaux (en-tête de
+    # `tests/test_logs_sans_pii.py`) : ici il ne sert qu'à confirmer qu'aucune
+    # trace chaînée n'est remontée. La preuve de non-fuite du CV, sur le vrai
+    # pipeline structlog, est dans ce fichier-là.
     sortie = capsys.readouterr()
     assert "fragment-de-cv-secret" not in sortie.out + sortie.err
 
@@ -712,7 +628,7 @@ async def test_le_plafond_de_simultaneite_borne_les_analyses_en_vol(
 async def test_une_panne_apres_un_appel_paye_rend_la_place_ET_consigne_le_cout(
     client_auth: TestClient,
     fournisseur_courriel_espion: FournisseurCourrielEspion,
-    harnais: _Harnais,
+    harnais: Harnais,
     base_profils_test: async_sessionmaker[AsyncSession],
 ) -> None:
     """IMPORTANT I-3, bout en bout : premier appel facturé puis illisible,

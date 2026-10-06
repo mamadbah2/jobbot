@@ -36,10 +36,19 @@ from src.api.app import create_app
 from src.api.routers.auth import log as log_du_router_auth
 from src.config import get_settings
 from src.logging_setup import setup_logging
-from tests.conftest import FournisseurCourrielEspion, demander_code_verification
+from tests.conftest import (
+    FournisseurCourrielEspion,
+    Harnais,
+    demander_code_verification,
+    docx_avec_texte,
+)
 
 ADRESSE = "fatou@jobbot-test.sn"
 TEL = "+221771234567"
+# Compte et marqueur propres au parcours CV : un marqueur reconnaissable
+# vaut mieux qu'un extrait de vrai CV, qu'on ne saurait pas chercher.
+ADRESSE_CV = "ndeye@jobbot-test.sn"
+MARQUEUR_CV = "Ndeye-Sow-Marqueur-De-CV-Confidentiel"
 
 
 @pytest.fixture
@@ -148,6 +157,99 @@ def test_exception_non_rattrapee_ne_fuite_rien_et_renvoie_500(
     assert ADRESSE not in rendu
     assert "fuite potentielle" not in rendu
     assert "RuntimeError" in rendu  # le TYPE, seule information journalisée
+
+
+@pytest.mark.integration
+def test_le_parcours_du_cv_ne_fuite_pas_son_contenu_dans_les_logs(
+    client_auth: TestClient,
+    fournisseur_courriel_espion: FournisseurCourrielEspion,
+    harnais: Harnais,
+    monkeypatch: pytest.MonkeyPatch,
+    pipeline_de_logs_reel: io.StringIO,
+) -> None:
+    """Règle n°1 de la spec Phase 3 : le texte d'un CV ne doit JAMAIS atteindre
+    un journal, un message d'exception ou une alerte admin.
+
+    Un marqueur reconnaissable traverse ici tous les chemins — dépôt,
+    extraction, analyse ratée, analyse réussie, correction du profil,
+    suppression — et la sortie JSON RÉELLEMENT rendue ne doit le contenir nulle
+    part. Le pipeline de ce fichier est le seul qui le prouve : `capsys` ne voit
+    pas ce que voit un collecteur de journaux (cf. en-tête).
+    """
+    import src.alerting as alerting
+
+    class _AlerteEspionne:
+        def __init__(self) -> None:
+            self.envois: list[tuple[str, dict[str, object]]] = []
+
+        async def envoyer(self, evenement: str, **contexte: object) -> None:
+            self.envois.append((evenement, contexte))
+
+    espion_alerte = _AlerteEspionne()
+    monkeypatch.setattr(alerting, "construire_alerte", lambda _s: espion_alerte)
+
+    code = demander_code_verification(client_auth, fournisseur_courriel_espion, ADRESSE_CV)
+    assert (
+        client_auth.post(
+            "/auth/code/verifie",
+            json={"email": ADRESSE_CV, "code": code, "nom_complet": "Ndeye Sow"},
+        ).status_code
+        == 200
+    )
+
+    contenu = docx_avec_texte(f"{MARQUEUR_CV} comptable chez Alpha SARL. " * 20)
+
+    # 1. Dépôt + extraction + analyse qui ÉCHOUE, avec le CV dans le message de
+    #    l'exception : la forme réelle d'une erreur SQLAlchemy sur `raw_cv_text`.
+    harnais.analyse.exception = RuntimeError(f"SQL error [parameters: ({MARQUEUR_CV!r},)]")
+    depot = client_auth.post("/profil/cv", files={"fichier": ("cv.docx", contenu)})
+    assert depot.status_code == 202
+    assert _attendre_etat(client_auth) == "echec"
+
+    # 2. Dépôt + analyse qui RÉUSSIT : le marqueur est alors dans le profil
+    #    structuré et dans la transcription, donc dans tout ce qu'on écrit.
+    harnais.analyse.exception = None
+    harnais.analyse.profil = {"nom_complet": MARQUEUR_CV, "competences": [MARQUEUR_CV]}
+    harnais.analyse.transcription = f"{MARQUEUR_CV} — transcription complète du CV"
+    depot = client_auth.post("/profil/cv", files={"fichier": ("cv.docx", contenu)})
+    assert depot.status_code == 202
+    assert _attendre_etat(client_auth) == "pret"
+
+    # 3. Correction du profil, puis suppression du compte.
+    assert (
+        client_auth.put(
+            "/profil", json={"nom_complet": MARQUEUR_CV, "competences": [MARQUEUR_CV]}
+        ).status_code
+        == 200
+    )
+    assert client_auth.delete("/moi").status_code == 204
+
+    rendu = pipeline_de_logs_reel.getvalue()
+    assert rendu, "le pipeline réel n'a rien rendu : le test ne prouve rien"
+    # Les événements attendus sont bien passés par là : sans eux, l'absence du
+    # marqueur ne prouverait rien.
+    for evenement in ("cv_analyse_echouee", "cv_analyse_terminee", "compte_supprime"):
+        assert evenement in rendu, evenement
+
+    assert MARQUEUR_CV not in rendu
+    assert "Alpha SARL" not in rendu
+    assert ADRESSE_CV not in rendu
+    # Et aucune alerte admin n'est partie : son corps recopie tout son contexte
+    # par le réseau (§7), c'est la sortie la plus exposée du produit.
+    assert espion_alerte.envois == []
+
+
+def _attendre_etat(client: TestClient) -> str:
+    """Attend la fin de l'analyse de fond. `en_attente` compte comme « pas
+    fini » : c'est l'état du dépôt tant qu'aucune place n'est libre."""
+    import time
+
+    for _ in range(100):
+        etat: str = client.get("/profil").json()["etat"]
+        if etat not in ("en_attente", "en_cours"):
+            return etat
+        time.sleep(0.05)
+    raise AssertionError("l'analyse ne s'est pas terminée")
 
 
 @pytest.mark.integration
