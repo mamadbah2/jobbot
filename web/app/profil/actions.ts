@@ -7,6 +7,7 @@ import {
   COOKIE_BROUILLON,
   ErreurApi,
   attributsCookieBrouillon,
+  effacementCookieBrouillon,
   listeTropLongue,
   serialiserBrouillon,
   type BrouillonProfil,
@@ -24,12 +25,14 @@ async function conserver(donnees: BrouillonProfil): Promise<void> {
   // Trop gros pour un cookie : on l'oublie plutôt que d'en poser un que le
   // navigateur jettera sans rien dire.
   if (valeur) magasin.set(COOKIE_BROUILLON, valeur, attributsCookieBrouillon())
-  else magasin.delete(COOKIE_BROUILLON)
+  else magasin.delete(effacementCookieBrouillon())
 }
 
 async function oublier(): Promise<void> {
   const magasin = await cookies()
-  magasin.delete(COOKIE_BROUILLON)
+  // Avec le chemin : un navigateur n'efface un cookie que si le chemin
+  // correspond, et celui-ci est posé sur `/profil`, pas sur `/`.
+  magasin.delete(effacementCookieBrouillon())
 }
 
 export async function envoyerCv(formData: FormData): Promise<void> {

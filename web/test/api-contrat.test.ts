@@ -5,9 +5,12 @@ import {
   ipCliente,
   lireCookieSession,
   attributsCookieSession,
+  attributsCookieBrouillon,
+  effacementCookieBrouillon,
   listeTropLongue,
   lireBrouillon,
   serialiserBrouillon,
+  COOKIE_BROUILLON,
   LIMITES_LISTES,
 } from '../app/api-contrat.ts'
 import {
@@ -234,4 +237,18 @@ test('un brouillon sérialisé ne contient que des caractères sûrs pour un coo
   assert.ok(valeur)
   assert.equal(encodeURIComponent(valeur), valeur)
   assert.equal(lireBrouillon(valeur)?.nom_complet, 'Awa Diop, « comptable » & fière de l’être')
+})
+
+test("le cookie de brouillon ne remonte que sur l'écran qui s'en sert", () => {
+  // Sur `path: '/'`, un cookie de 3,5 Ko qui vit 15 minutes repartait avec
+  // TOUTES les requêtes, les fragments `/_next/` compris : de l'ordre de 25 Ko
+  // d'émission par chargement de page, sur une data comptée (§11). Invisible
+  // pour `mesure-poids.mjs`, qui ne compte que la descente.
+  assert.equal(attributsCookieBrouillon().path, '/profil')
+  // Et l'effacement vise le MÊME chemin : un navigateur n'efface un cookie que
+  // si le chemin correspond. Sans cela, le brouillon d'un essai précédent se
+  // rappliquerait indéfiniment sur l'écran.
+  const effacement = effacementCookieBrouillon()
+  assert.equal(effacement.path, attributsCookieBrouillon().path)
+  assert.equal(effacement.name, COOKIE_BROUILLON)
 })

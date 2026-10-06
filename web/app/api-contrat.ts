@@ -218,14 +218,32 @@ export function lireBrouillon(valeur: string | undefined): BrouillonProfil | nul
   }
 }
 
+/** Le seul chemin qui lit ce cookie : `/profil` le pose (ses Server Actions
+ *  postent sur l'URL de la page) et `/profil` le relit. Sur `path: '/'` il
+ *  repartait avec TOUTES les requêtes — les six fragments `/_next/` compris,
+ *  soit de l'ordre de 25 Ko d'émission par chargement de page, sur une data
+ *  comptée (§11). Et c'est du gaspillage invisible : `mesure-poids.mjs` ne
+ *  compte que la descente. */
+export const CHEMIN_COOKIE_BROUILLON = '/profil'
+
 export function attributsCookieBrouillon() {
   return {
     httpOnly: true,
     sameSite: 'lax' as const,
     secure: EN_PROD,
-    path: '/',
+    path: CHEMIN_COOKIE_BROUILLON,
     maxAge: 15 * 60,
   }
+}
+
+/** Ce qu'il faut passer à `cookies().delete` pour effacer RÉELLEMENT le
+ *  brouillon. Un navigateur n'efface un cookie que si le chemin correspond :
+ *  `delete(NOM)` tout court viserait `path: '/'` et laisserait en place celui
+ *  qui est posé sur `/profil` — la saisie d'un essai précédent se
+ *  rappliquerait indéfiniment. Un test vérifie que les deux chemins
+ *  concordent. */
+export function effacementCookieBrouillon() {
+  return { name: COOKIE_BROUILLON, path: CHEMIN_COOKIE_BROUILLON }
 }
 
 export const COOKIE_ADRESSE = 'jobbot_adresse_en_cours'
