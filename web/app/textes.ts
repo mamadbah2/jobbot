@@ -122,6 +122,29 @@ export const T = {
   boutonSupprimer: 'Oui, supprimer définitivement',
   annuler: 'Annuler',
   donneesSupprimees: 'Vos données ont été supprimées.',
+  // Page « Vos données » : elle DÉCRIT ce que le système fait, vérifiable
+  // contre le code. Aucun engagement juridique : ce texte-là appartient au
+  // porteur du projet (§14.4, ouvert).
+  titreConfidentialite: 'Vos données',
+  introConfidentialite: 'Voici, simplement, ce que nous faisons de vos informations.',
+  titreCollecte: 'Ce que nous gardons',
+  listeCollecte: [
+    'Votre adresse email.',
+    'Votre nom.',
+    'Le texte de votre CV.',
+    'Votre profil : expériences, formations, compétences, langues, et ce que vous cherchez.',
+  ],
+  titreFichier: 'Ce que nous ne gardons pas',
+  texteFichier:
+    "Votre fichier d'origine (PDF, Word ou photo) n'est jamais conservé. Une fois lu, il est oublié.",
+  titreTransfert: 'Où va votre CV',
+  texteTransfert:
+    "Pour lire votre CV, son contenu est envoyé à DeepSeek, notre prestataire d'analyse, qui se trouve hors du Sénégal.",
+  titreDuree: 'Combien de temps',
+  texteDuree: 'Vos informations restent tant que votre compte existe.',
+  titreSupprimer: 'Tout supprimer',
+  texteSupprimer: "Vous pouvez tout effacer vous-même, à tout moment. C'est immédiat et définitif.",
+  lienSupprimer: 'Supprimer mes données',
   choisir: 'Choisir',
   champNomProfil: 'Votre nom',
   champTitre: 'Le poste que vous cherchez',

@@ -33,6 +33,13 @@ client web :
 4. Saisissez ce code, puis votre nom à la première connexion. Vous arrivez sur
    la liste des offres. `/compte` affiche vos informations et le bouton de
    déconnexion.
+5. Allez sur `/profil` : déposez un CV (PDF, Word ou photo). L'écran d'attente se
+   recharge tout seul, puis affiche le profil lu ; corrigez-le, choisissez vos
+   préférences et enregistrez. L'analyse appelle DeepSeek pour de vrai et
+   **coûte** de l'ordre de 0,4 FCFA par CV : sans `DEEPSEEK_API_KEY`, elle échoue
+   proprement mais ne produit rien.
+6. `/confidentialite` décrit ce qui est gardé ; `/compte/supprimer` efface tout,
+   immédiatement et définitivement.
 
 > `web` n'est PAS derrière un reverse proxy et le sait : `WEB_DERRIERE_PROXY`
 > vaut `false`, donc aucun `X-Forwarded-For` n'est transmis à l'API, et les
@@ -98,6 +105,7 @@ du déploiement : rien ici ne s'active tout seul.
 | `PROXY_IPS_DE_CONFIANCE` **et** `WEB_DERRIERE_PROXY` | Les deux ou aucun. Sans eux, le plafond par IP compte tous les utilisateurs ensemble ; avec l'un des deux seulement, ou avec une valeur trop large, l'IP devient usurpable et le plafond ne vaut plus rien |
 | `POSTGRES_PASSWORD` explicite | `.env.example` est public et `src/config.py` a une valeur par défaut — **la même** : `jobbot_dev_password`, publiée dans les deux fichiers |
 | `FOURNISSEUR_COURRIEL` autre que `console` | Sinon le démarrage échoue en `prod` — `console` écrit le code de vérification en clair dans les logs |
+| `DEEPSEEK_API_KEY` | Sans elle, le dépôt d'un CV est accepté puis l'analyse échoue (quota rendu) : l'écran `/profil` ne produit jamais de profil. Un CV est refusé avant tout appel payant s'il n'a pas de texte |
 | `ADMIN_COURRIEL` | Sans lui, une alerte de scraper cassé ne part nulle part : elle reste dans les logs du VPS, à lire à la main |
 | Reverse proxy **avec TLS** devant `web` | `web` est publié en direct sur toutes les interfaces et aucun proxy n'est déclaré dans `docker-compose.yml`. Sans TLS, `ENVIRONMENT=prod` pose `secure: true` sur le cookie de session et le navigateur le jette : la connexion échoue **sans aucune erreur serveur** |
 | Nom de domaine + SPF/DKIM/DMARC | Aucun email réel ne part sans cela (§14.1) |

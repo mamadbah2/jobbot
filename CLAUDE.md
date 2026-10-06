@@ -97,7 +97,21 @@ Les paquets sont ajoutés phase par phase, pas tous d'un coup, pour garder l'ima
 > qu'`aiogram` ne revient ni dans `src/` ni dans les dépendances déclarées : sans lui, Telegram
 > pourrait rentrer par un import isolé sans que rien ne le signale.
 
-À ajouter plus tard : `openai` (Phase 3), `python-docx` + `pdfplumber` (Phase 3/5), le paquet du
+### Dépendances ajoutées en Phase 3
+
+| Paquet | Justification |
+|---|---|
+| `openai` | §9, SDK du client DeepSeek (API compatible OpenAI, `base_url=https://api.deepseek.com`) |
+| `pdfplumber` | §3, extraction du texte d'un CV en PDF avant tout appel payant |
+| `python-docx` | §3, extraction du texte d'un CV en DOCX ; servira aussi à générer les documents (Phase 5) |
+
+> **`selectolax` borné `<1` le 2026-10-06** : la version 1.0 a supprimé le backend Modest que
+> `src/ingest/sources/emploidakar.py` importe (`selectolax.parser`). Sans borne, une reconstruction
+> d'image récupérait la 1.x et `api` ne démarrait plus (import de `worker_ingest` au chargement).
+> Migrer vers `selectolax.lexbor` est un chantier d'ingestion à part : il change le moteur de
+> parsing, donc les fixtures sont à rejouer.
+
+À ajouter plus tard : le paquet du
 fournisseur d'envoi d'email (quand un domaine existera, cf. §14.1).
 
 ---
@@ -152,6 +166,10 @@ jobbot/
 │   │   ├── courriel_valide.py # validation + normalisation d'adresse
 │   │   ├── erreurs.py         # exceptions métier, traduites par chaque client
 │   │   ├── saisie.py          # contrôles communs à toute saisie utilisateur (bornes, type)
+│   │   ├── limites.py         # primitives de comptage à fenêtre fixe sur Redis (auth et CV)
+│   │   ├── cv_fichier.py      # reconnaissance du type de fichier + extraction du texte, sans LLM
+│   │   ├── cv_limites.py      # plafond d'analyses de CV par jour et par utilisateur
+│   │   ├── cv_etat.py         # ce que l'écran montre selon l'état d'analyse (fonction pure)
 │   │   ├── alerte.py          # Protocol AlerteAdmin — `core` ignore COMMENT l'alerte part
 │   │   ├── cache.py           # Protocol CacheRedis — le minimum dont `core` a besoin,
 │   │   │                      #   sans dépendre du client `redis` (test d'isolation, tâche 17)
@@ -170,11 +188,13 @@ jobbot/
 │   │   ├── deps.py            # session DB, utilisateur courant
 │   │   ├── schemas/           # entrées/sorties pydantic
 │   │   │   ├── auth.py
-│   │   │   └── offres.py      # projection explicite d'une offre, pas un dump du modèle
+│   │   │   ├── offres.py      # projection explicite d'une offre, pas un dump du modèle
+│   │   │   └── profil.py      # projection du profil et de son état d'analyse
 │   │   └── routers/
 │   │       ├── auth.py        # /auth/code/demande, /auth/code/verifie, /auth/deconnexion
 │   │       ├── moi.py         # /moi
 │   │       ├── offres.py      # /offres, liste paginée réservée aux comptes connectés
+│   │       ├── profil.py      # GET /profil, POST /profil/cv (dépôt), PUT /profil (validation)
 │   │       └── sante.py       # /health (DB + Redis) — déplacé depuis src/health.py
 │   ├── db/
 │   │   ├── models.py
@@ -196,9 +216,9 @@ jobbot/
 │   │   ├── store.py           # écriture des offres (upsert sur source+source_id)
 │   │   └── dedupe.py
 │   ├── llm/
-│   │   ├── client.py          # wrapper DeepSeek + retry + compteur de coût
-│   │   ├── prompts.py         # tous les prompts système, versionnés
-│   │   ├── cv_parser.py       # CV brut -> profil structuré
+│   │   ├── client.py          # wrapper DeepSeek + retry + coût (livré Phase 3)
+│   │   ├── prompts.py         # tous les prompts système, versionnés (livré Phase 3)
+│   │   ├── cv_parser.py       # CV brut ou photo -> profil structuré (livré Phase 3)
 │   │   ├── cv_tailor.py       # profil + offre -> CV adapté
 │   │   └── cover_letter.py
 │   ├── docs/
@@ -236,7 +256,14 @@ jobbot/
     │   │       └── actions.ts  # Server Action : vérification du code, création du compte
     │   ├── compte/
     │   │   ├── page.tsx        # adresse, nom, état, déconnexion
-    │   │   └── actions.ts      # Server Action : déconnexion (incrémente token_version)
+    │   │   ├── actions.ts      # Server Actions : déconnexion, suppression des données
+    │   │   └── supprimer/
+    │   │       └── page.tsx    # confirmation de la suppression, sans JavaScript
+    │   ├── profil/
+    │   │   ├── page.tsx        # dépôt de CV, attente, validation — rend ce que l'état commande
+    │   │   └── actions.ts      # Server Actions : dépôt du CV, enregistrement du profil
+    │   ├── confidentialite/
+    │   │   └── page.tsx        # ce que le système collecte, garde, envoie, supprime (§14.4)
     │   └── offres/
     │       └── page.tsx        # liste des offres, déclenche rafraichir_si_necessaire
     ├── public/
@@ -281,7 +308,14 @@ Tables minimales (à créer via Alembic, pas de `create_all` en prod) :
 > TTL 5 minutes. Pas de compteur d'essais sur le code lui-même : c'est le plafond de cadence
 > par adresse (`auth_verifications_par_heure`, `src/config.py`) qui protège contre la force brute.
 
-**`profiles`** — `user_id` FK, `raw_cv_text`, `structured` (JSONB : expériences, formations, compétences, langues, secteurs visés, mobilité, prétention salariale), `cv_file_path`, `updated_at`
+**`profiles`** — `user_id` FK, `raw_cv_text`, `structured` (JSONB : expériences, formations, compétences, langues, secteurs visés, mobilité, prétention salariale), `parse_etat` (en_attente/en_cours/pret/echec), `parse_erreur`, `parse_demarre_le`, `updated_at`
+
+> **`cv_file_path` supprimée le 2026-10-01 (migration `0006`) : le fichier d'origine n'est jamais
+> conservé.** Le texte extrait et le profil structuré suffisent à toute la suite (matching, lettres) ;
+> garder le fichier ajouterait une pièce à protéger, à sauvegarder et à effacer sur demande, pour
+> aucun usage. Une photo de CV transite par Redis (TTL court) le temps de l'analyse, jamais par
+> Postgres. `parse_etat` / `parse_erreur` / `parse_demarre_le` portent l'analyse en tâche de fond :
+> si `api` redémarre en pleine analyse, l'écran traite un `en_cours` trop ancien comme un échec.
 
 **`subscriptions`** — `user_id` FK, `plan` (free/pro), `status` (active/expired/pending), `started_at`, `expires_at`, `provider_ref`, `amount_fcfa`
 
@@ -337,8 +371,12 @@ Le quota de 25 est un **plafond de coût**, pas une limite arbitraire. Il doit �
 ### Onboarding (doit tenir en moins de 2 minutes)
 
 1. Adresse email → code à 6 chiffres → nom (le nom uniquement si le compte est nouveau)
-2. Upload du CV (PDF ou DOCX) → parsing → **affichage du profil extrait pour validation** (l'utilisateur corrige en un tap)
+2. Upload du CV (PDF, DOCX ou photo) → parsing → **affichage du profil extrait pour validation** (l'utilisateur corrige en un tap)
 3. Choix des secteurs + région + type de contrat (boutons, pas de saisie libre)
+
+> **Les étapes 2 et 3 partent dans une seule soumission** depuis la Phase 3 : les corrections du
+> profil et les préférences sont enregistrées ensemble. Chaque étape de plus coûte des abandons
+> (§11) et un aller-retour payé en data ; les fusionner en épargne une.
 4. Première alerte envoyée immédiatement — **la valeur doit être visible avant toute demande de paiement**
 
 > **Par quel canal ?** Les alertes offres partaient par Telegram jusqu'au 2026-09-12 ; leur canal
@@ -448,7 +486,19 @@ Le marché sénégalais est petit : les mêmes recruteurs à Dakar reçoivent to
 ## 9. Couche LLM (DeepSeek)
 
 - Client unique dans `llm/client.py`, jamais d'appel direct ailleurs.
-- Utiliser `deepseek-chat`. Vérifier les tarifs et noms de modèles en cours sur la doc officielle avant de figer quoi que ce soit — ne te fie pas à une valeur en dur.
+- **Modèles : `deepseek-flash` (défaut, `DEEPSEEK_MODELE`) et `deepseek-v4-pro`.** `deepseek-chat`, nommé par une version antérieure de ce brief, n'existe plus (relevé contre `/models` le 2026-10-01). **`deepseek-flash` lit les images, `deepseek-v4-pro` non** : le client refuse d'envoyer une photo à un modèle qui ne la lit pas, plutôt que de payer un 400.
+- **Grille de tarifs relevée le 2026-10-01** (revérifier avant de s'y fier : elle est datée), en dollars par million de tokens :
+
+  | | entrée (cache touché) | entrée (cache manqué) | sortie |
+  |---|---|---|---|
+  | `deepseek-flash` hors pointe | 0,003 | 0,15 | 0,6 |
+  | `deepseek-flash` en pointe | 0,006 | 0,3 | 1,2 |
+  | `deepseek-v4-pro` hors pointe | 0,022 | 0,66 | 1,98 |
+  | `deepseek-v4-pro` en pointe | 0,044 | 1,32 | 3,96 |
+
+  Pointe : 01:00-04:00 et 06:00-10:00 UTC, du lundi au vendredi.
+- **Deux pièges de facturation.** (1) L'entrée servie par le cache coûte **50 fois moins** que l'entrée manquée : le coût se calcule avec le détail renvoyé par l'API, jamais avec un tarif moyen. (2) La pointe **double tout** : un coût calculé sans regarder l'heure se trompe du simple au double.
+- **Coût mesuré le 2026-10-06** sur le parcours réel (`deepseek-flash`, hors pointe) : 0,00066 USD pour un CV texte, 0,00067 USD pour une photo, soit environ 0,4 FCFA, sous le plafond de 15 FCFA. Un CV synthétique court : à reconfirmer sur de vrais CV.
 - **Activer le context caching** : le profil utilisateur est identique d'une candidature à l'autre → le placer en tête du prompt pour bénéficier du cache et réduire fortement le coût en entrée.
 - `temperature` basse (0.3) pour le parsing de CV, moyenne (0.8) pour la lettre.
 - **Sortie structurée en JSON** pour le parsing de CV et le matching. Parsing défensif : nettoyer les fences ``` avant `json.loads`, et retry une fois en cas d'échec.
@@ -518,6 +568,13 @@ Upload CV, parsing DeepSeek, validation par l'utilisateur, préférences. Expos�
 par le web.
 *Validation : 10 CV réels de formats différents parsés correctement.*
 
+> **Les dix CV réels sont une fourniture du porteur du projet, pas un livrable du code.** Ils
+> n'existent pas dans le dépôt, et des CV synthétiques ne valideraient rien : le critère mesure la
+> résistance aux mises en page réelles (colonnes, tableaux, polices inhabituelles, photos). Le code
+> est livré et le parcours a été déroulé de bout en bout le 2026-10-06 sur un seul CV d'essai
+> (PDF, scan refusé, photo, suppression) ; **le critère lui-même reste à constater** quand les
+> fichiers seront fournis.
+
 **Phase 4 — Offres et alertes (3 j.)**
 Matching, filtres, alertes 2x/jour par **notifications push web** (§14.9, tranché le 2026-09-14).
 La liste des offres en lecture seule existe déjà, livrée avec le client web.
@@ -566,12 +623,12 @@ Administration par **commandes CLI sur le VPS** (`docker compose exec api python
 1. Nom de domaine et nom du produit. — **`jobbot` retenu à titre PROVISOIRE le 2026-08-26.** **Redevenu nécessaire le 2026-09-11** avec l'authentification par email : SPF, DKIM et DMARC exigent un domaine possédé, et un sous-domaine gratuit ne convient pas (§7). **Ne bloque pas la Phase 2** — elle se développe et se teste intégralement avec le fournisseur d'envoi « console », et un bac à sable de fournisseur permet même de recevoir de vrais emails sur l'adresse vérifiée du propriétaire du compte. **Bloque l'ouverture à de vrais utilisateurs, donc la Phase 6.** Ordre de grandeur : 7 000 à 8 500 FCFA par an pour un `.com`. — ouvert
 2. Agrégateur mobile money retenu et grille de frais réelle. — ouvert
 3. Statut juridique de la structure (nécessaire pour ouvrir un compte marchand). — ouvert
-4. Politique de confidentialité : les CV sont des données personnelles. Durée de conservation, suppression sur demande, action « supprimer mes données » à prévoir dans le web. Elle n'a jamais été écrite : elle était prévue en commande Telegram `/supprimer_mes_donnees`, et se reporte sur le web depuis le 2026-09-12. — ouvert
+4. Politique de confidentialité : les CV sont des données personnelles. Durée de conservation, suppression sur demande, action « supprimer mes données » à prévoir dans le web. Elle était prévue en commande Telegram `/supprimer_mes_donnees`, et s'est reportée sur le web le 2026-09-12. — **Tranché pour le comportement le 2026-10-06, ouvert pour le texte juridique.** Le fichier d'origine n'est jamais conservé ; `DELETE /moi` (écran `/compte/supprimer`) supprime tout, immédiatement et définitivement ; l'envoi du contenu du CV à DeepSeek, hors du Sénégal, est annoncé sur l'écran de dépôt. La page `/confidentialite` **décrit** ce comportement, sans aucun engagement. **Reste ouvert : le texte juridique**, qui engage le porteur du projet et lui appartient.
 5. Adresse email de l'utilisateur. — **Rouvert et tranché le 2026-09-11** : l'adresse devient l'**identité de connexion**, `users.email` passe `NOT NULL UNIQUE`. Elle ne sert toujours pas de Reply-To, puisque le service n'écrit à aucun recruteur (§2, interdiction n°1).
 
 6. Fournisseur d'envoi d'email transactionnel. — à choisir en même temps que le domaine. — ouvert
 
-7. Politique de confidentialité et suppression des données sur demande (voir point 4). — La Phase 2 stocke l'adresse email et le nom ; la Phase 3 y ajoutera les CV. À trancher **au plus tard en Phase 3**.
+7. Politique de confidentialité et suppression des données sur demande (voir point 4). — La Phase 2 stocke l'adresse email et le nom ; la Phase 3 y ajoutera les CV. À trancher **au plus tard en Phase 3** — comportement tranché, cf. point 4 ; seul le texte juridique reste ouvert.
 
 8. **Canal d'administration.** — **Posé le 2026-09-12.** Telegram portait le seul canal admin prévu : alerte de scraper cassé (§7), repli de paiement manuel (§10), exploitation courante (§12 Phase 8). Une seule des trois est réglée.
    - *Tranché et fait* : les alertes partent par email vers `ADMIN_COURRIEL`, avec repli sur le log du VPS quand il est vide.
