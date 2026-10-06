@@ -133,6 +133,7 @@ export const T = {
     'Votre nom.',
     'Le texte de votre CV.',
     'Votre profil : expériences, formations, compétences, langues, et ce que vous cherchez.',
+    "Ce que l'analyse de vos CV a consommé : ce compteur disparaît avec votre compte. Un autre compteur limite vos dépôts par jour : il n'est pas supprimé avec le compte, mais il s'efface tout seul en moins de 24 heures.",
   ],
   titreFichier: 'Ce que nous ne gardons pas',
   texteFichier:

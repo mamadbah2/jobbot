@@ -36,7 +36,7 @@ client web :
 5. Allez sur `/profil` : déposez un CV (PDF, Word ou photo). L'écran d'attente se
    recharge tout seul, puis affiche le profil lu ; corrigez-le, choisissez vos
    préférences et enregistrez. L'analyse appelle DeepSeek pour de vrai et
-   **coûte** de l'ordre de 0,4 FCFA par CV : sans `DEEPSEEK_API_KEY`, elle échoue
+   **coûte** : environ 0,4 FCFA mesuré sur un CV synthétique court, **environ 1 FCFA** attendu pour un vrai CV de deux pages (à reconfirmer) ; sans `DEEPSEEK_API_KEY`, elle échoue
    proprement mais ne produit rien.
 6. `/confidentialite` décrit ce qui est gardé ; `/compte/supprimer` efface tout,
    immédiatement et définitivement.

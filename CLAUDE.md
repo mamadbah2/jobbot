@@ -104,6 +104,7 @@ Les paquets sont ajoutés phase par phase, pas tous d'un coup, pour garder l'ima
 | `openai` | §9, SDK du client DeepSeek (API compatible OpenAI, `base_url=https://api.deepseek.com`) |
 | `pdfplumber` | §3, extraction du texte d'un CV en PDF avant tout appel payant |
 | `python-docx` | §3, extraction du texte d'un CV en DOCX ; servira aussi à générer les documents (Phase 5) |
+| `python-multipart` | Requis par FastAPI pour tout `UploadFile` / `File()` (dépôt de CV) ; maintenu par les auteurs de Starlette, et un parseur multipart maison serait un risque de sécurité disproportionné |
 
 > **`selectolax` borné `<1` le 2026-10-06** : la version 1.0 a supprimé le backend Modest que
 > `src/ingest/sources/emploidakar.py` importe (`selectolax.parser`). Sans borne, une reconstruction
@@ -310,7 +311,7 @@ Tables minimales (à créer via Alembic, pas de `create_all` en prod) :
 
 **`profiles`** — `user_id` FK, `raw_cv_text`, `structured` (JSONB : expériences, formations, compétences, langues, secteurs visés, mobilité, prétention salariale), `parse_etat` (en_attente/en_cours/pret/echec), `parse_erreur`, `parse_demarre_le`, `updated_at`
 
-> **`cv_file_path` supprimée le 2026-10-01 (migration `0006`) : le fichier d'origine n'est jamais
+> **`cv_file_path` supprimée le 2026-10-06 (migration `0006` ; la décision date de la spec du 2026-10-01) : le fichier d'origine n'est jamais
 > conservé.** Le texte extrait et le profil structuré suffisent à toute la suite (matching, lettres) ;
 > garder le fichier ajouterait une pièce à protéger, à sauvegarder et à effacer sur demande, pour
 > aucun usage. Une photo de CV transite par Redis (TTL court) le temps de l'analyse, jamais par
@@ -496,9 +497,9 @@ Le marché sénégalais est petit : les mêmes recruteurs à Dakar reçoivent to
   | `deepseek-v4-pro` hors pointe | 0,022 | 0,66 | 1,98 |
   | `deepseek-v4-pro` en pointe | 0,044 | 1,32 | 3,96 |
 
-  Pointe : 01:00-04:00 et 06:00-10:00 UTC, du lundi au vendredi.
+  Pointe : 01:00-04:00 et 06:00-10:00 UTC, du lundi au vendredi. La grille officielle exclut les jours fériés chinois ; le code ne les connaît pas et les facture **au tarif de pointe** par prudence (`est_en_pointe`, `src/llm/client.py`) : on surestime la dépense, jamais l'inverse. Ce n'est pas un bug.
 - **Deux pièges de facturation.** (1) L'entrée servie par le cache coûte **50 fois moins** que l'entrée manquée : le coût se calcule avec le détail renvoyé par l'API, jamais avec un tarif moyen. (2) La pointe **double tout** : un coût calculé sans regarder l'heure se trompe du simple au double.
-- **Coût mesuré le 2026-10-06** sur le parcours réel (`deepseek-flash`, hors pointe) : 0,00066 USD pour un CV texte, 0,00067 USD pour une photo, soit environ 0,4 FCFA, sous le plafond de 15 FCFA. Un CV synthétique court : à reconfirmer sur de vrais CV.
+- **Coût mesuré le 2026-10-06** sur le parcours réel (`deepseek-flash`, hors pointe) : 0,00066 USD pour un CV texte, 0,00067 USD pour une photo, soit environ 0,4 FCFA, sous le plafond de 15 FCFA. Un CV synthétique court : à reconfirmer sur de vrais CV, où l'on attend plutôt **environ 1 FCFA** pour deux pages.
 - **Activer le context caching** : le profil utilisateur est identique d'une candidature à l'autre → le placer en tête du prompt pour bénéficier du cache et réduire fortement le coût en entrée.
 - `temperature` basse (0.3) pour le parsing de CV, moyenne (0.8) pour la lettre.
 - **Sortie structurée en JSON** pour le parsing de CV et le matching. Parsing défensif : nettoyer les fences ``` avant `json.loads`, et retry une fois en cas d'échec.
