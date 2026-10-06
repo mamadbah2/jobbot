@@ -110,6 +110,9 @@ export const T = {
   champFichier: 'Votre CV',
   boutonDeposer: 'Analyser mon CV',
   analyseEnCours: "Nous lisons votre CV. Cette page se met à jour toute seule.",
+  // L'analyse attend son tour : ne pas dire « nous lisons », ce serait faux.
+  analyseEnAttente:
+    "Nous avons bien reçu votre CV. Sa lecture commence dans un instant. Cette page se met à jour toute seule.",
   titreValidation: 'Vérifiez votre profil',
   aideValidation: "Corrigez ce qui est faux, puis choisissez ce que vous cherchez.",
   boutonValider: 'Enregistrer',

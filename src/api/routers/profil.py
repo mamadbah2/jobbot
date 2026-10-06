@@ -14,8 +14,8 @@ from decimal import Decimal
 from typing import Annotated, Any
 
 import redis.asyncio as aioredis
-from fastapi import APIRouter, Depends, File, Response, UploadFile, status
-from sqlalchemy import select
+from fastapi import APIRouter, Depends, File, UploadFile, status
+from sqlalchemy import select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -42,13 +42,38 @@ _TACHES_DE_FOND: set[asyncio.Task[None]] = set()
 
 _PREFIXE_IMAGE = "jobbot:cv:image"
 
+# Plafond de simultanéité des analyses, tous utilisateurs confondus. Le plafond
+# de `cv_limites.py` est par UTILISATEUR et par jour : il ne borne pas ce qui
+# tourne EN MÊME TEMPS. Or une analyse de photo retient le fichier reçu (5 Mo au
+# plus), son encodage base64 (~4/3 de plus) et les tampons du client HTTP
+# pendant toute la durée de l'appel à DeepSeek — de l'ordre de 20 à 30 Mo chacune
+# pendant plusieurs secondes. Sur la CX22 à 4 Go du brief, partagée avec
+# Postgres, Redis et `web`, quelques dizaines de dépôts concurrents tuent `api`
+# et emportent TOUTES les analyses en vol, quota consommé et argent déjà dépensé.
+#
+# 4 places et non 8 : 4 × 30 Mo ≈ 120 Mo de pointe, ce que la machine absorbe
+# sans discuter, et le débit n'en souffre pas puisque l'essentiel du temps d'une
+# analyse est passé à attendre DeepSeek, pas à calculer. Le dépôt, lui, répond
+# toujours immédiatement : c'est la tâche de fond qui fait la queue.
+#
+# Variable de module (et non constante figée dans la fonction) pour qu'un test
+# puisse la remplacer par un sémaphore à une place.
+_PLACES_SIMULTANEES = 4
+_SEMAPHORE = asyncio.Semaphore(_PLACES_SIMULTANEES)
+
 
 def cle_image_cv(user_id: int) -> str:
     """Clé Redis de l'image d'un CV en attente d'analyse.
 
     Déterministe, sans horodatage : `DELETE /moi` doit pouvoir l'effacer en O(1)
-    sans `SCAN`. Deux dépôts simultanés se la disputent, mais la garde optimiste
-    sur `parse_demarre_le` fait déjà perdre le plus ancien (`image_expiree`).
+    sans `SCAN`. Le prix de ce choix est qu'un utilisateur n'a qu'UNE case : un
+    second dépôt écrase l'image du premier. La conséquence est bornée et toujours
+    la même — l'un des deux dépôts finit en `image_expiree` et l'utilisateur
+    redépose — mais ce n'est pas forcément le plus ancien qui perd : si la
+    première tâche a déjà démarré son analyse, c'est elle qui lira l'image de la
+    seconde, et la seconde ne trouvera plus rien. Seule la garde sur
+    `parse_demarre_le` est exacte : le profil enregistré est toujours celui du
+    dépôt le plus récent, quelle que soit l'image analysée.
     """
     return f"{_PREFIXE_IMAGE}:{user_id}"
 
@@ -142,7 +167,7 @@ async def _analyser_en_arriere_plan(
     texte: str | None,
     cle_image: str | None,
     type_image: str | None,
-    demarre_le: datetime,
+    depose_le: datetime,
 ) -> None:
     """Possède son propre client Redis et sa propre session.
 
@@ -156,12 +181,65 @@ async def _analyser_en_arriere_plan(
     contenu d'un CV.
     """
     try:
-        await _analyser(user_id, texte, cle_image, type_image, demarre_le)
+        await _analyser(user_id, texte, cle_image, type_image, depose_le)
     except Exception as exc:  # noqa: BLE001 — dernière barrière, nom du type seulement
         log.error("cv_tache_de_fond_echouee", user_id=user_id, type_erreur=type(exc).__name__)
 
 
+async def _demarrer(user_id: int, depose_le: datetime) -> datetime | None:
+    """Passe la ligne de `en_attente` à `en_cours`, et (re)pose son horloge.
+
+    Rend le nouvel instant, qui devient le jeton de la garde optimiste pour la
+    suite de l'analyse — ou `None` quand il n'y a plus rien à analyser.
+
+    Deux raisons d'être, et la première est une question d'argent : un dépôt
+    plus récent arrivé pendant l'attente a réécrit `parse_demarre_le`, donc le
+    `UPDATE` ci-dessous ne touche aucune ligne, et on abandonne AVANT de payer
+    un appel dont le résultat serait de toute façon jeté par la garde finale.
+    La seconde est l'horloge de péremption (`core/cv_etat.py`) : si elle restait
+    posée à l'instant du dépôt, le temps passé en file d'attente se déduirait du
+    délai de l'analyse et un CV serait annoncé perdu avant d'avoir été lu.
+    """
+    debut = datetime.now(UTC)
+    async with session_scope() as session:
+        # `returning` plutôt que `rowcount` : la ligne rendue dit sans ambiguïté
+        # que la promotion a eu lieu, et le type est exact pour mypy.
+        promue = (
+            await session.execute(
+                update(Profile)
+                .where(
+                    Profile.user_id == user_id,
+                    Profile.parse_demarre_le == depose_le,
+                    Profile.parse_etat == "en_attente",
+                )
+                .values(parse_etat="en_cours", parse_demarre_le=debut)
+                .returning(Profile.user_id)
+            )
+        ).scalar_one_or_none()
+        if promue is None:
+            return None
+    return debut
+
+
 async def _analyser(
+    user_id: int,
+    texte: str | None,
+    cle_image: str | None,
+    type_image: str | None,
+    depose_le: datetime,
+) -> None:
+    """Attend une place, puis analyse. Le dépôt, lui, a déjà répondu."""
+    async with _SEMAPHORE:
+        demarre_le = await _demarrer(user_id, depose_le)
+        if demarre_le is None:
+            # Un dépôt plus récent a pris la main pendant l'attente (ou le
+            # compte a disparu) : rien à payer, rien à écrire.
+            log.info("cv_analyse_abandonnee", user_id=user_id)
+            return
+        await _analyser_sous_plafond(user_id, texte, cle_image, type_image, demarre_le)
+
+
+async def _analyser_sous_plafond(
     user_id: int,
     texte: str | None,
     cle_image: str | None,
@@ -291,8 +369,13 @@ async def _marquer_echec(
             await consigner_cout(session, user_id, tokens_entree=0, tokens_sortie=0, cout_usd=cout)
 
 
-async def preparer_profil(session: AsyncSession, user_id: int, demarre_le: datetime) -> Profile:
-    """Pose le profil en `en_cours` par un upsert atomique.
+async def preparer_profil(session: AsyncSession, user_id: int, depose_le: datetime) -> Profile:
+    """Pose le profil en `en_attente` par un upsert atomique.
+
+    `en_attente` et non `en_cours` : rien n'est en cours tant que la tâche de
+    fond n'a pas obtenu une place (`_SEMAPHORE`). L'écran distingue les deux et
+    le dit, et chaque phase a sa propre horloge de péremption
+    (`core/cv_etat.py`).
 
     Lire puis insérer laisserait deux dépôts simultanés (le double-tap sur un
     bouton lent en 3G) s'insérer tous deux : le second violerait l'unicité de
@@ -300,15 +383,15 @@ async def preparer_profil(session: AsyncSession, user_id: int, demarre_le: datet
     la fin de la nouvelle analyse.
     """
     insertion = pg_insert(Profile).values(
-        user_id=user_id, parse_etat="en_cours", parse_erreur=None, parse_demarre_le=demarre_le
+        user_id=user_id, parse_etat="en_attente", parse_erreur=None, parse_demarre_le=depose_le
     )
     await session.execute(
         insertion.on_conflict_do_update(
             index_elements=["user_id"],
             set_={
-                "parse_etat": "en_cours",
+                "parse_etat": "en_attente",
                 "parse_erreur": None,
-                "parse_demarre_le": demarre_le,
+                "parse_demarre_le": depose_le,
             },
         )
     )
@@ -328,7 +411,6 @@ def _planifier(coro: Any) -> None:
 
 @router.post("/profil/cv", status_code=status.HTTP_202_ACCEPTED)
 async def deposer_cv(
-    response: Response,
     utilisateur: Annotated[User, Depends(deps.utilisateur_courant)],
     session: Annotated[AsyncSession, Depends(deps.session_db)],
     cache: Annotated[Any, Depends(deps.cache_redis)],
@@ -365,10 +447,16 @@ async def deposer_cv(
             contenu, type_cv, minimum=settings.cv_texte_min_caracteres
         )
 
-    demarre_le = datetime.now(UTC)
-    profil = await preparer_profil(session, utilisateur.id, demarre_le)
+    depose_le = datetime.now(UTC)
+    profil = await preparer_profil(session, utilisateur.id, depose_le)
+    # Valider AVANT de planifier la tâche : elle ouvre sa propre session, et une
+    # ligne encore invisible pour elle lui ferait jeter son résultat en silence
+    # (son `UPDATE` de démarrage ne trouverait rien à promouvoir). `session_scope`
+    # valide une transaction déjà vide sans rien faire : ce commit anticipé ne
+    # retire rien au commit de fin de requête.
+    await session.commit()
 
-    _planifier(_analyser_en_arriere_plan(utilisateur.id, texte, cle_image, type_cv, demarre_le))
+    _planifier(_analyser_en_arriere_plan(utilisateur.id, texte, cle_image, type_cv, depose_le))
     return _vue(profil)
 
 

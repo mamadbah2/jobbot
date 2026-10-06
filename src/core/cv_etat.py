@@ -14,6 +14,14 @@ from datetime import datetime
 
 ANALYSE_INTERROMPUE = "analyse_interrompue"
 
+# Les deux états « en vol », chacun avec sa propre horloge : `parse_demarre_le`
+# porte l'instant du DÉPÔT tant qu'on est en file d'attente, puis l'instant où
+# l'analyse a réellement démarré (le dépôt attend qu'une place se libère,
+# `src/api/routers/profil.py`). Chaque phase dispose donc du même budget,
+# compté depuis son propre début : sans cela, une attente en file consommerait
+# le délai de l'analyse et un CV serait déclaré perdu avant d'avoir été lu.
+_EN_VOL = ("en_attente", "en_cours")
+
 
 def etat_affiche(
     parse_etat: str,
@@ -28,16 +36,17 @@ def etat_affiche(
     L'interruption l'emporte sur le code stocké : quand c'est elle qui décide,
     la valeur en base n'a plus de sens.
     """
-    if parse_etat != "en_cours":
+    if parse_etat not in _EN_VOL:
         # Le code stocké d'un vrai échec doit ressortir : sinon chaque appelant
         # devrait le recoller lui-même, et le premier qui l'oublie affiche un
         # échec muet.
         return parse_etat, parse_erreur
     if parse_demarre_le is None:
-        # `en_cours` sans date de départ : incohérent, donc suspect. On préfère
-        # proposer de redéposer plutôt que de faire attendre indéfiniment.
+        # `en_attente`/`en_cours` sans date de départ : incohérent, donc
+        # suspect. On préfère proposer de redéposer plutôt que de faire
+        # attendre indéfiniment.
         return "echec", ANALYSE_INTERROMPUE
     age = (maintenant - parse_demarre_le).total_seconds()
     if age > delai_max_secondes:
         return "echec", ANALYSE_INTERROMPUE
-    return "en_cours", None
+    return parse_etat, None

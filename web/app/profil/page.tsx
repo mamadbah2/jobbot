@@ -35,6 +35,9 @@ export default async function PageProfil({
   // Rechargement par balise HTML : aucun JavaScript, donc ça marche même quand
   // le runtime Next n'arrive jamais (3G qui coupe), et l'analyse continue si
   // l'utilisateur ferme son navigateur.
+  // `en_attente` : le dépôt est enregistré et attend une place d'analyse
+  // (plafond de simultanéité côté API). `en_cours` : DeepSeek lit le CV. Les
+  // deux attendent, mais on ne promet pas une lecture qui n'a pas commencé.
   if (etat.etat === 'en_cours' || etat.etat === 'en_attente') {
     // Pas de journal ici : la page se recharge toute les 5 s, huit « vues »
     // pour une seule personne ruineraient la mesure d'abandon (§11).
@@ -45,7 +48,7 @@ export default async function PageProfil({
           <a href="/offres">{T.lienOffres}</a> · <a href="/compte">{T.lienCompte}</a>
         </nav>
         <h1>{T.titreProfil}</h1>
-        <p>{T.analyseEnCours}</p>
+        <p>{etat.etat === 'en_attente' ? T.analyseEnAttente : T.analyseEnCours}</p>
       </main>
     )
   }

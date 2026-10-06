@@ -84,15 +84,18 @@ def test_un_fichier_trop_gros_est_refuse(
 
 
 @pytest.mark.integration
-def test_un_depot_valide_passe_en_cours_et_rend_202(
+def test_un_depot_valide_passe_en_attente_et_rend_202(
     client_auth: TestClient, fournisseur_courriel_espion: FournisseurCourrielEspion
 ) -> None:
-    """La réponse ne doit JAMAIS attendre l'analyse : l'utilisateur est sur 3G."""
+    """La réponse ne doit JAMAIS attendre l'analyse : l'utilisateur est sur 3G.
+
+    `en_attente` et non `en_cours` : rien n'est en cours tant que la tâche de
+    fond n'a pas obtenu une place (plafond de simultanéité, I-1)."""
     _connecter(client_auth, fournisseur_courriel_espion)
     contenu = _docx("Awa Diop comptable chez Alpha SARL depuis 2019. " * 20)
     r = client_auth.post("/profil/cv", files={"fichier": ("cv.docx", contenu)})
     assert r.status_code == 202
-    assert r.json()["etat"] == "en_cours"
+    assert r.json()["etat"] == "en_attente"
 
 
 @pytest.mark.integration
@@ -279,7 +282,9 @@ def _attendre_fin(client: TestClient) -> dict[str, Any]:
 
     for _ in range(100):
         corps: dict[str, Any] = client.get("/profil").json()
-        if corps["etat"] != "en_cours":
+        # `en_attente` compte comme « pas fini » : sinon le premier sondage
+        # rendrait l'état de la file d'attente et le test ne prouverait rien.
+        if corps["etat"] not in ("en_attente", "en_cours"):
             return corps
         time.sleep(0.05)
     raise AssertionError("l'analyse ne s'est pas terminée")
@@ -461,23 +466,80 @@ async def test_le_dernier_depot_gagne_meme_si_lancien_finit_apres(
         await routeur.preparer_profil(s, uid, recent)
         await s.commit()
 
-    # L'analyse de l'ANCIEN dépôt finit après le second : elle ne doit rien écrire.
+    # L'ANCIEN dépôt n'a pas encore obtenu sa place : il doit abandonner AVANT
+    # de payer, puisque son résultat serait de toute façon jeté (I-1, `_demarrer`).
     await routeur._analyser_en_arriere_plan(uid, "ancien cv", None, None, ancien)
     async with base_profils_test() as s:
         ligne = (await s.execute(select(Profile).where(Profile.user_id == uid))).scalar_one()
-        cout = (
-            await s.execute(select(UsageCounter).where(UsageCounter.user_id == uid))
-        ).scalar_one()
-    assert ligne.parse_etat == "en_cours"
+        compteurs = (
+            (await s.execute(select(UsageCounter).where(UsageCounter.user_id == uid)))
+            .scalars()
+            .all()
+        )
+    assert ligne.parse_etat == "en_attente"
+    assert ligne.parse_demarre_le == recent
     assert ligne.structured is None
-    # ... mais son coût, lui, a été payé.
-    assert cout.llm_tokens_in == 15
+    assert harnais.analyse.appels == [], "l'ancien dépôt ne doit RIEN payer"
+    assert compteurs == []
 
     await routeur._analyser_en_arriere_plan(uid, "nouveau cv", None, None, recent)
     async with base_profils_test() as s:
         ligne = (await s.execute(select(Profile).where(Profile.user_id == uid))).scalar_one()
     assert ligne.parse_etat == "pret"
     assert ligne.structured is not None
+
+
+@pytest.mark.integration
+async def test_un_depot_arrive_pendant_lanalyse_nest_pas_ecrase_mais_le_cout_reste(
+    client_auth: TestClient,
+    fournisseur_courriel_espion: FournisseurCourrielEspion,
+    harnais: _Harnais,
+    base_profils_test: async_sessionmaker[AsyncSession],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """L'autre moitié de la garde optimiste : ici l'analyse a DÉJÀ démarré quand
+    le second dépôt arrive. Trop tard pour abandonner, l'appel est payé — son
+    résultat est jeté (le profil du vieux CV n'écrase pas le neuf), mais son coût
+    reste consigné."""
+    from datetime import UTC, datetime, timedelta
+
+    from sqlalchemy import select
+
+    from src.api.routers import profil as routeur
+    from src.db.models import Profile, UsageCounter
+
+    _connecter(client_auth, fournisseur_courriel_espion)
+    uid = await _uid(base_profils_test)
+    ancien = datetime.now(UTC)
+    recent = ancien + timedelta(seconds=1)
+    async with base_profils_test() as s:
+        await routeur.preparer_profil(s, uid, ancien)
+        await s.commit()
+
+    reel = harnais.analyse
+
+    async def _depot_concurrent(**kw: Any) -> Any:
+        # Le second dépôt tombe PENDANT l'appel au modèle, comme en production.
+        async with base_profils_test() as s:
+            await routeur.preparer_profil(s, uid, recent)
+            await s.commit()
+        return await reel(**kw)
+
+    # Sur l'objet du module : réaffecter `__call__` sur l'INSTANCE ne change
+    # rien, Python résout les méthodes spéciales sur le type.
+    monkeypatch.setattr(routeur, "analyser_cv", _depot_concurrent)
+    await routeur._analyser_en_arriere_plan(uid, "ancien cv", None, None, ancien)
+
+    async with base_profils_test() as s:
+        ligne = (await s.execute(select(Profile).where(Profile.user_id == uid))).scalar_one()
+        cout = (
+            await s.execute(select(UsageCounter).where(UsageCounter.user_id == uid))
+        ).scalar_one()
+    assert ligne.parse_etat == "en_attente"
+    assert ligne.parse_demarre_le == recent
+    assert ligne.structured is None
+    # ... mais son coût, lui, a bien été payé.
+    assert cout.llm_tokens_in == 15
 
 
 @pytest.mark.integration
@@ -563,3 +625,84 @@ def test_un_fichier_accepte_reste_en_memoire() -> None:
 
     create_app()
     assert MultiPartParser.spool_max_size >= get_settings().cv_taille_max_octets
+
+
+@pytest.mark.integration
+async def test_le_plafond_de_simultaneite_borne_les_analyses_en_vol(
+    base_profils_test: async_sessionmaker[AsyncSession],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """IMPORTANT I-1 : le plafond de `cv_limites.py` est par utilisateur et par
+    jour — il ne borne pas ce qui tourne EN MÊME TEMPS. Sans `_SEMAPHORE`, N
+    dépôts concurrents retiennent chacun 20 à 30 Mo et tuent `api` sur la CX22.
+
+    N+2 analyses lancées d'un coup, un double qui bloque dans la partie
+    coûteuse : au plus N doivent y être entrées à la fois.
+    """
+    import asyncio
+    from contextlib import asynccontextmanager
+    from datetime import UTC, datetime
+    from decimal import Decimal
+
+    from src.api.routers import profil as routeur
+    from src.db.models import User
+    from src.llm.client import CoutAppel
+
+    places = 2
+    monkeypatch.setattr(routeur, "_SEMAPHORE", asyncio.Semaphore(places))
+
+    dedans = 0
+    maximum = 0
+    liberer = asyncio.Event()
+
+    async def _analyse(**kw: Any) -> Any:
+        nonlocal dedans, maximum
+        dedans += 1
+        maximum = max(maximum, dedans)
+        await liberer.wait()
+        dedans -= 1
+        return {"nom_complet": "Awa"}, "transcription", CoutAppel(1, 1, 1, Decimal("0.0001"))
+
+    class _Redis:
+        async def aclose(self) -> None:
+            return None
+
+    @asynccontextmanager
+    async def _scope() -> AsyncIterator[AsyncSession]:
+        async with base_profils_test() as s:
+            yield s
+            await s.commit()
+
+    monkeypatch.setattr(routeur, "analyser_cv", _analyse)
+    monkeypatch.setattr(routeur, "_ouvrir_redis", lambda: _Redis())
+    monkeypatch.setattr(routeur, "session_scope", _scope)
+
+    # Des utilisateurs DISTINCTS : c'est la simultanéité ENTRE comptes que rien
+    # d'autre ne borne. Purgés par `base_utilisateurs_test` (@jobbot-test.sn).
+    depots: list[tuple[int, datetime]] = []
+    async with base_profils_test() as s:
+        for i in range(places + 2):
+            compte = User(email=f"simultane{i}@jobbot-test.sn", full_name="Awa")
+            s.add(compte)
+            await s.flush()
+            depose_le = datetime.now(UTC)
+            await routeur.preparer_profil(s, compte.id, depose_le)
+            depots.append((compte.id, depose_le))
+        await s.commit()
+
+    taches = [
+        asyncio.create_task(routeur._analyser_en_arriere_plan(uid, "cv", None, None, t))
+        for uid, t in depots
+    ]
+    try:
+        # Laisse les N+2 tâches courir jusqu'à leur blocage respectif.
+        for _ in range(100):
+            await asyncio.sleep(0.02)
+            if dedans >= places:
+                break
+        assert dedans == places, f"{dedans} analyses entrées, plafond {places}"
+    finally:
+        liberer.set()
+        await asyncio.gather(*taches)
+
+    assert maximum == places, f"{maximum} analyses simultanées pour un plafond de {places}"

@@ -34,8 +34,23 @@ def test_en_cours_sans_date_de_depart_est_suspect() -> None:
     assert _affiche("en_cours", None) == ("echec", ANALYSE_INTERROMPUE)
 
 
-def test_les_autres_etats_passent_meme_avec_une_date_ancienne() -> None:
-    for etat in ("en_attente", "pret", "echec"):
+def test_une_attente_en_file_reste_en_attente() -> None:
+    """`en_attente` est l'état réel d'un dépôt qui attend une place (plafond de
+    simultanéité, `src/api/routers/profil.py`) : il ne doit pas être présenté
+    comme une analyse en cours, ni comme un échec."""
+    assert _affiche("en_attente", 10) == ("en_attente", None)
+    assert _affiche("en_attente", 300) == ("en_attente", None)
+
+
+def test_une_attente_en_file_trop_vieille_devient_un_echec() -> None:
+    """`api` a redémarré pendant que le dépôt attendait son tour : personne ne
+    reprendra le travail, et sans cette règle l'écran attendrait pour toujours."""
+    assert _affiche("en_attente", 301) == ("echec", ANALYSE_INTERROMPUE)
+    assert _affiche("en_attente", None) == ("echec", ANALYSE_INTERROMPUE)
+
+
+def test_les_etats_termines_passent_meme_avec_une_date_ancienne() -> None:
+    for etat in ("pret", "echec"):
         for age in (None, 10, 100_000):
             assert _affiche(etat, age) == (etat, None)
 
