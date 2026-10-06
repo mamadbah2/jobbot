@@ -1,8 +1,22 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 
-import { ipCliente, lireCookieSession, attributsCookieSession } from '../app/api-contrat.ts'
-import { etatLisible, texteErreur, CODES_ERREUR, ERREURS } from '../app/textes.ts'
+import {
+  ipCliente,
+  lireCookieSession,
+  attributsCookieSession,
+  listeTropLongue,
+  lireBrouillon,
+  serialiserBrouillon,
+  LIMITES_LISTES,
+} from '../app/api-contrat.ts'
+import {
+  etatLisible,
+  texteErreur,
+  texteTropDeValeurs,
+  CODES_ERREUR,
+  ERREURS,
+} from '../app/textes.ts'
 import { codeConnu } from '../app/journal.ts'
 
 test("ipCliente ne garde que la première IP de la chaîne", () => {
@@ -108,4 +122,97 @@ test('un Max-Age nul ou négatif est traité comme absent', () => {
     entetes.append('set-cookie', `jobbot_session=x; ${brut}; Path=/`)
     assert.equal(lireCookieSession(entetes)?.maxAge, undefined, `non traité : ${brut}`)
   }
+})
+
+test('listeTropLongue nomme la liste qui déborde, et de combien', () => {
+  // Le cas réel : un CV qui donne 60 compétences. Sans ce contrôle, l'API
+  // répond un 422 de pydantic sans clé `erreur` et l'écran n'a rien à dire.
+  const donnees = {
+    nom_complet: 'Awa Diop',
+    titre: null,
+    competences: Array.from({ length: 60 }, (_, i) => `competence ${i}`),
+    langues: ['français'],
+    secteurs_vises: [],
+    mobilite: null,
+    type_contrat: null,
+  }
+  assert.deepEqual(listeTropLongue(donnees), {
+    champ: 'competences',
+    saisi: 60,
+    limite: LIMITES_LISTES.competences,
+  })
+})
+
+test('listeTropLongue laisse passer une liste pile à la limite', () => {
+  const donnees = {
+    nom_complet: null,
+    titre: null,
+    competences: Array.from({ length: LIMITES_LISTES.competences }, (_, i) => `c${i}`),
+    langues: Array.from({ length: LIMITES_LISTES.langues }, (_, i) => `l${i}`),
+    secteurs_vises: Array.from({ length: LIMITES_LISTES.secteurs_vises }, (_, i) => `s${i}`),
+    mobilite: null,
+    type_contrat: null,
+  }
+  assert.equal(listeTropLongue(donnees), null)
+})
+
+test('le message de dépassement nomme la liste, la limite et le nombre à retirer', () => {
+  const message = texteTropDeValeurs('competences', 60, 50)
+  assert.match(message, /compétences/)
+  assert.match(message, /50/)
+  assert.match(message, /10/)
+  // Jamais le nom de colonne : ce n'est pas du français (§11).
+  assert.ok(!message.includes('competences'))
+})
+
+test('un brouillon fait l’aller-retour par le cookie sans rien perdre', () => {
+  const donnees = {
+    nom_complet: 'Awa Diop',
+    titre: 'Comptable, à Dakar & ailleurs',
+    competences: ['SAGE', 'Excel'],
+    langues: ['français', 'wolof'],
+    secteurs_vises: ['Comptabilité et finance'],
+    mobilite: 'Dakar',
+    type_contrat: 'CDI',
+  }
+  const valeur = serialiserBrouillon(donnees)
+  assert.ok(valeur)
+  assert.deepEqual(lireBrouillon(valeur), donnees)
+})
+
+test('un champ vidé par l’utilisateur reste vide au retour', () => {
+  // La saisie fait foi EN BLOC : sans cela, effacer un champ serait annulé par
+  // la valeur enregistrée, et l'utilisateur ne pourrait jamais rien supprimer.
+  const valeur = serialiserBrouillon({
+    nom_complet: null,
+    titre: null,
+    competences: [],
+    langues: [],
+    secteurs_vises: [],
+    mobilite: null,
+    type_contrat: null,
+  })
+  assert.deepEqual(lireBrouillon(valeur!)?.nom_complet, null)
+})
+
+test('un brouillon trop gros pour un cookie est abandonné, jamais tronqué', () => {
+  // Un cookie de plus de 4 Ko est jeté par le navigateur SANS erreur : poser
+  // un brouillon ingérable ferait perdre la saisie sans que personne ne le voie.
+  const enorme = {
+    nom_complet: null,
+    titre: null,
+    competences: Array.from({ length: 50 }, () => 'x'.repeat(200)),
+    langues: [],
+    secteurs_vises: [],
+    mobilite: null,
+    type_contrat: null,
+  }
+  assert.equal(serialiserBrouillon(enorme), null)
+})
+
+test('un cookie de brouillon trafiqué ne casse pas l’écran', () => {
+  assert.equal(lireBrouillon('pas du json'), null)
+  assert.equal(lireBrouillon(undefined), null)
+  // Un JSON valide mais de mauvaise forme donne des listes vides, pas un plantage.
+  assert.deepEqual(lireBrouillon(encodeURIComponent('{"competences": 3}'))?.competences, [])
 })

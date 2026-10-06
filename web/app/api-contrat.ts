@@ -132,6 +132,93 @@ export function attributsCookieSession(maxAge?: number): AttributsCookie {
   return maxAge && maxAge > 0 ? { ...base, maxAge } : base
 }
 
+/** Les plafonds de `CorrectionProfil` (src/api/schemas/profil.py), recopiés ici
+ *  parce qu'ils doivent être connus AVANT l'appel : l'API les refuse avec un 422
+ *  de pydantic, dont le corps n'a pas de clé `erreur`, donc l'écran n'afficherait
+ *  qu'un « une erreur est survenue » devant lequel l'utilisateur ne peut rien.
+ *  Un test Python vérifie que les deux listes sont identiques. */
+export const LIMITES_LISTES = {
+  competences: 50,
+  langues: 20,
+  secteurs_vises: 20,
+} as const
+
+export type ChampListe = keyof typeof LIMITES_LISTES
+
+/** Ce que l'écran de profil envoie, et ce qu'il doit savoir reconstituer après
+ *  une erreur : exactement les champs du formulaire. */
+export type BrouillonProfil = {
+  nom_complet: string | null
+  titre: string | null
+  competences: string[]
+  langues: string[]
+  secteurs_vises: string[]
+  mobilite: string | null
+  type_contrat: string | null
+}
+
+export type ListeTropLongue = { champ: ChampListe; saisi: number; limite: number }
+
+/** La PREMIÈRE liste qui dépasse, ou `null`. On en nomme une seule : le message
+ *  reste court (§11) et l'utilisateur corrige celle-là, puis la suivante. */
+export function listeTropLongue(donnees: BrouillonProfil): ListeTropLongue | null {
+  for (const champ of Object.keys(LIMITES_LISTES) as ChampListe[]) {
+    const limite = LIMITES_LISTES[champ]
+    const saisi = donnees[champ].length
+    if (saisi > limite) return { champ, saisi, limite }
+  }
+  return null
+}
+
+export const COOKIE_BROUILLON = 'jobbot_profil_brouillon'
+
+/** Au-delà, le cookie est abandonné : un navigateur en jette un de plus de 4 Ko,
+ *  et un cookie jeté en silence ferait perdre la saisie SANS que personne ne le
+ *  voie. Mieux vaut renoncer en le sachant — l'écran affiche alors le profil
+ *  enregistré, et le message qui dit quoi corriger reste là. */
+export const TAILLE_MAX_BROUILLON = 3500
+
+/** La saisie en cours, conservée le temps d'un aller-retour d'erreur — même
+ *  mécanisme que `COOKIE_ADRESSE` : sans JavaScript, un `redirect` perd ce qui a
+ *  été tapé, et un formulaire de profil retapé est un abandon (§11). */
+export function serialiserBrouillon(donnees: BrouillonProfil): string | null {
+  const encode = encodeURIComponent(JSON.stringify(donnees))
+  return encode.length > TAILLE_MAX_BROUILLON ? null : encode
+}
+
+export function lireBrouillon(valeur: string | undefined): BrouillonProfil | null {
+  if (!valeur) return null
+  try {
+    const brut = JSON.parse(decodeURIComponent(valeur)) as Partial<BrouillonProfil>
+    const liste = (v: unknown): string[] =>
+      Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : []
+    const texte = (v: unknown): string | null => (typeof v === 'string' ? v : null)
+    return {
+      nom_complet: texte(brut.nom_complet),
+      titre: texte(brut.titre),
+      competences: liste(brut.competences),
+      langues: liste(brut.langues),
+      secteurs_vises: liste(brut.secteurs_vises),
+      mobilite: texte(brut.mobilite),
+      type_contrat: texte(brut.type_contrat),
+    }
+  } catch {
+    // Cookie tronqué ou trafiqué : on repart du profil enregistré plutôt que
+    // de casser l'écran.
+    return null
+  }
+}
+
+export function attributsCookieBrouillon() {
+  return {
+    httpOnly: true,
+    sameSite: 'lax' as const,
+    secure: EN_PROD,
+    path: '/',
+    maxAge: 15 * 60,
+  }
+}
+
 export const COOKIE_ADRESSE = 'jobbot_adresse_en_cours'
 
 /** L'adresse en cours de vérification : elle transite par cookie et JAMAIS par

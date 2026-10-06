@@ -35,6 +35,7 @@ export type Etape =
   | 'vue_profil_echec'
   | 'cv_depose'
   | 'cv_refuse'
+  | 'profil_trop_long'
   | 'profil_valide'
   | 'donnees_supprimees'
 

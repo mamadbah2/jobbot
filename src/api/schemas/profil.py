@@ -5,9 +5,22 @@ Champs en français, comme `schemas/auth.py` et `schemas/offres.py`.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Final
 
 from pydantic import BaseModel, Field
+
+# Les listes corrigeables et leur plafond. SOURCE UNIQUE côté Python : ces trois
+# nombres sont aussi connus du client web (`web/app/api-contrat.ts`), qui doit
+# refuser AVANT d'appeler pour pouvoir dire laquelle déborde et de combien. Un
+# test vérifie que les deux côtés ne divergent pas (`tests/test_textes_web.py`) :
+# sans lui, l'écran laisserait passer ce que l'API refuse, et l'utilisateur
+# tournerait en rond sur un message générique — la seule boucle sans sortie du
+# parcours (revue finale, I-2).
+LIMITES_LISTES: Final[dict[str, int]] = {
+    "competences": 50,
+    "langues": 20,
+    "secteurs_vises": 20,
+}
 
 
 class ProfilVu(BaseModel):
@@ -29,8 +42,12 @@ class CorrectionProfil(BaseModel):
 
     nom_complet: str | None = Field(default=None, max_length=255)
     titre: str | None = Field(default=None, max_length=255)
-    competences: list[str] = Field(default_factory=list, max_length=50)
-    langues: list[str] = Field(default_factory=list, max_length=20)
-    secteurs_vises: list[str] = Field(default_factory=list, max_length=20)
+    competences: list[str] = Field(
+        default_factory=list, max_length=LIMITES_LISTES["competences"]
+    )
+    langues: list[str] = Field(default_factory=list, max_length=LIMITES_LISTES["langues"])
+    secteurs_vises: list[str] = Field(
+        default_factory=list, max_length=LIMITES_LISTES["secteurs_vises"]
+    )
     mobilite: str | None = Field(default=None, max_length=255)
     type_contrat: str | None = Field(default=None, max_length=64)

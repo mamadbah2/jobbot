@@ -1,9 +1,17 @@
+import { cookies } from 'next/headers'
 import { redirect } from 'next/navigation'
 
 import { moi, profil } from '../api-client'
+import {
+  COOKIE_BROUILLON,
+  LIMITES_LISTES,
+  lireBrouillon,
+  listeTropLongue,
+  type ChampListe,
+} from '../api-contrat'
 import { EcranPanne } from '../ecran-panne'
 import { journaliser } from '../journal'
-import { CONTRATS, REGIONS, SECTEURS, T, texteErreur } from '../textes'
+import { CONTRATS, REGIONS, SECTEURS, T, texteErreur, texteTropDeValeurs } from '../textes'
 import { enregistrerProfil, envoyerCv } from './actions'
 
 type Ligne = Record<string, string | undefined>
@@ -11,7 +19,7 @@ type Ligne = Record<string, string | undefined>
 export default async function PageProfil({
   searchParams,
 }: {
-  searchParams: Promise<{ erreur?: string; redeposer?: string }>
+  searchParams: Promise<{ erreur?: string; redeposer?: string; trop?: string; saisi?: string }>
 }) {
   const panne = (
     <EcranPanne reessayerHref="/profil" retour={{ href: '/offres', libelle: T.lienOffres }} />
@@ -29,8 +37,14 @@ export default async function PageProfil({
   // chaque requête pour se faire refuser à chaque fois.
   if (!utilisateur || !etat) redirect('/connexion/expiree')
 
-  const { erreur, redeposer } = await searchParams
-  const message = texteErreur(erreur) ?? texteErreur(etat.erreur ?? undefined)
+  const { erreur, redeposer, trop, saisi } = await searchParams
+  // Une liste trop longue a son propre message, qui nomme la liste et le
+  // nombre à retirer : le code générique ne dirait rien d'actionnable.
+  const messageTrop =
+    trop && trop in LIMITES_LISTES
+      ? texteTropDeValeurs(trop, Number(saisi) || 0, LIMITES_LISTES[trop as ChampListe])
+      : null
+  const message = messageTrop ?? texteErreur(erreur) ?? texteErreur(etat.erreur ?? undefined)
 
   // Rechargement par balise HTML : aucun JavaScript, donc ça marche même quand
   // le runtime Next n'arrive jamais (3G qui coupe), et l'analyse continue si
@@ -56,7 +70,11 @@ export default async function PageProfil({
   // `absent`, `pret` ou `echec` : ici seulement, une vue = une personne.
   journaliser(`vue_profil_${etat.etat}`)
 
-  if (etat.etat === 'pret' && etat.structured && !redeposer) {
+  // `echec` AVEC un profil enregistré : c'est un REDÉPÔT qui a échoué. Le profil
+  // précédent est toujours valide et doit rester visible — le masquer ferait
+  // croire à l'utilisateur qu'il a tout perdu. Le message d'échec s'affiche à
+  // côté, et le lien « déposer un autre CV » reste la sortie.
+  if ((etat.etat === 'pret' || etat.etat === 'echec') && etat.structured && !redeposer) {
     const s = etat.structured
     const texte = (cle: string): string => (typeof s[cle] === 'string' ? (s[cle] as string) : '')
     const liste = (cle: string): string[] =>
@@ -66,15 +84,42 @@ export default async function PageProfil({
     const lignes = (cle: string): Ligne[] => (Array.isArray(s[cle]) ? (s[cle] as Ligne[]) : [])
     const experiences = lignes('experiences')
     const formations = lignes('formations')
-    const secteurs = liste('secteurs_vises')
+
+    // La saisie d'une tentative refusée prime sur ce qui est enregistré : sans
+    // JavaScript, c'est la seule façon de ne pas la perdre au `redirect`. Un
+    // champ vidé par l'utilisateur reste vide — `brouillon` fait foi en bloc,
+    // jamais champ par champ, sinon une suppression volontaire serait annulée.
+    const brouillon = lireBrouillon((await cookies()).get(COOKIE_BROUILLON)?.value)
+    const valeurs = brouillon ?? {
+      nom_complet: texte('nom_complet'),
+      titre: texte('titre'),
+      competences: liste('competences'),
+      langues: liste('langues'),
+      secteurs_vises: liste('secteurs_vises'),
+      mobilite: texte('mobilite'),
+      type_contrat: texte('type_contrat'),
+    }
+
+    const secteurs = valeurs.secteurs_vises
     // Ce que le formulaire ne sait pas afficher (secteur en texte libre
     // extrait du CV, région hors liste) est montré et conservé : l'écraser
     // en silence ferait perdre à l'utilisateur ce qu'il ne voit jamais.
     const secteursHorsListe = secteurs.filter((x) => !SECTEURS.includes(x))
-    const mobilite = texte('mobilite')
+    const mobilite = valeurs.mobilite ?? ''
     const regions = mobilite && !REGIONS.includes(mobilite) ? [mobilite, ...REGIONS] : REGIONS
-    const typeContrat = texte('type_contrat')
+    const typeContrat = valeurs.type_contrat ?? ''
     const contrats = typeContrat && !CONTRATS.includes(typeContrat) ? [typeContrat, ...CONTRATS] : CONTRATS
+
+    // Un CV peut donner plus de compétences que l'API n'en accepte. On ne
+    // tronque pas en silence — l'utilisateur ne saurait pas lesquelles ont
+    // disparu : on les montre toutes et on lui dit, AVANT qu'il soumette,
+    // combien en retirer.
+    const debordement = listeTropLongue(valeurs)
+    const avertissement =
+      message ??
+      (debordement
+        ? texteTropDeValeurs(debordement.champ, debordement.saisi, debordement.limite)
+        : null)
 
     return (
       <main>
@@ -83,7 +128,7 @@ export default async function PageProfil({
         </nav>
         <h1>{T.titreValidation}</h1>
         <p>{T.aideValidation}</p>
-        {message && <p className="erreur">{message}</p>}
+        {avertissement && <p className="erreur">{avertissement}</p>}
         <section className="offre">
           <h2>{T.titreLecture}</h2>
           {experiences.length === 0 && formations.length === 0 ? (
@@ -109,16 +154,20 @@ export default async function PageProfil({
 
         <form action={enregistrerProfil}>
           <label htmlFor="nom_complet">{T.champNomProfil}</label>
-          <input id="nom_complet" name="nom_complet" defaultValue={texte('nom_complet')} />
+          <input id="nom_complet" name="nom_complet" defaultValue={valeurs.nom_complet ?? ''} />
 
           <label htmlFor="titre">{T.champTitre}</label>
-          <input id="titre" name="titre" defaultValue={texte('titre')} />
+          <input id="titre" name="titre" defaultValue={valeurs.titre ?? ''} />
 
           <label htmlFor="competences">{T.champCompetences}</label>
-          <input id="competences" name="competences" defaultValue={liste('competences').join(', ')} />
+          <input
+            id="competences"
+            name="competences"
+            defaultValue={valeurs.competences.join(', ')}
+          />
 
           <label htmlFor="langues">{T.champLangues}</label>
-          <input id="langues" name="langues" defaultValue={liste('langues').join(', ')} />
+          <input id="langues" name="langues" defaultValue={valeurs.langues.join(', ')} />
 
           <fieldset>
             <legend>{T.legendeSecteurs}</legend>

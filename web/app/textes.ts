@@ -69,6 +69,23 @@ export function texteErreur(code: string | undefined): string | null {
   return ERREURS[code] ?? ERREURS.defaut
 }
 
+/** Noms des listes, tels qu'on les dit à l'utilisateur. Jamais `secteurs_vises`,
+ *  qui est un nom de colonne. */
+const LISTES: Record<string, string> = {
+  competences: 'compétences',
+  langues: 'langues',
+  secteurs_vises: 'secteurs',
+}
+
+/** Dit QUELLE liste déborde et DE COMBIEN : un « une erreur est survenue »
+ *  devant un formulaire qui refuse d'enregistrer est une impasse (§11, et
+ *  revue finale I-2). Le message est construit, pas stocké, parce qu'il porte
+ *  des nombres — il reste ici, avec les autres textes. */
+export function texteTropDeValeurs(champ: string, saisi: number, limite: number): string {
+  const nom = LISTES[champ] ?? 'entrées'
+  return `Vous avez ${saisi} ${nom} et nous n'en gardons que ${limite}. Retirez-en ${saisi - limite}, puis enregistrez.`
+}
+
 export const T = {
   titreAdresse: 'Votre adresse email',
   aideAdresse: "Nous vous envoyons un code à 6 chiffres. Il n'y a pas de mot de passe.",

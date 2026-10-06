@@ -1,16 +1,46 @@
 'use server'
 
+import { cookies } from 'next/headers'
 import { redirect } from 'next/navigation'
 
-import { ErreurApi } from '../api-contrat'
+import {
+  COOKIE_BROUILLON,
+  ErreurApi,
+  attributsCookieBrouillon,
+  listeTropLongue,
+  serialiserBrouillon,
+  type BrouillonProfil,
+} from '../api-contrat'
 import { corrigerProfil, deposerCv } from '../api-client'
 import { codeConnu, journaliser } from '../journal'
+
+/** Conserve la saisie le temps d'un aller-retour d'erreur, ou l'oublie quand
+ *  elle est enregistrée. Sans JavaScript, le `redirect` qui porte le message
+ *  d'erreur recharge la page depuis la base : sans ce cookie, tout ce que
+ *  l'utilisateur vient de taper disparaît avec lui. */
+async function conserver(donnees: BrouillonProfil): Promise<void> {
+  const valeur = serialiserBrouillon(donnees)
+  const magasin = await cookies()
+  // Trop gros pour un cookie : on l'oublie plutôt que d'en poser un que le
+  // navigateur jettera sans rien dire.
+  if (valeur) magasin.set(COOKIE_BROUILLON, valeur, attributsCookieBrouillon())
+  else magasin.delete(COOKIE_BROUILLON)
+}
+
+async function oublier(): Promise<void> {
+  const magasin = await cookies()
+  magasin.delete(COOKIE_BROUILLON)
+}
 
 export async function envoyerCv(formData: FormData): Promise<void> {
   const fichier = formData.get('fichier')
   if (!(fichier instanceof File) || fichier.size === 0) {
     redirect('/profil?erreur=cv_type_refuse')
   }
+
+  // Un nouveau CV remplace le profil : un brouillon de l'ancien n'a plus de
+  // sens et se rappliquerait sur l'écran de validation du nouveau.
+  await oublier()
 
   // redirect() lève une exception interceptée par Next : jamais dans un try,
   // sinon le catch l'avalerait et la page n'irait nulle part.
@@ -38,7 +68,7 @@ export async function enregistrerProfil(formData: FormData): Promise<void> {
       .map((v) => v.trim())
       .filter(Boolean)
 
-  const donnees = {
+  const donnees: BrouillonProfil = {
     nom_complet: String(formData.get('nom_complet') ?? '').trim() || null,
     titre: String(formData.get('titre') ?? '').trim() || null,
     competences: liste('competences'),
@@ -46,6 +76,17 @@ export async function enregistrerProfil(formData: FormData): Promise<void> {
     secteurs_vises: formData.getAll('secteurs').map(String),
     mobilite: String(formData.get('region') ?? '').trim() || null,
     type_contrat: String(formData.get('contrat') ?? '').trim() || null,
+  }
+
+  // Les mêmes plafonds que `CorrectionProfil`, vérifiés AVANT l'appel : l'API
+  // les refuse avec un 422 de pydantic, sans code d'erreur exploitable, et
+  // l'écran ne saurait dire que « une erreur est survenue » — devant quoi
+  // l'utilisateur n'a aucune action possible (revue finale, I-2).
+  const trop = listeTropLongue(donnees)
+  if (trop) {
+    await conserver(donnees)
+    journaliser('profil_trop_long')
+    redirect(`/profil?trop=${trop.champ}&saisi=${trop.saisi}`)
   }
 
   let echec: string | null = null
@@ -56,7 +97,12 @@ export async function enregistrerProfil(formData: FormData): Promise<void> {
     else throw erreur
   }
 
-  if (echec) redirect(`/profil?erreur=${encodeURIComponent(echec)}`)
+  if (echec) {
+    // La saisie survit aussi aux refus de l'API : c'est le même aller-retour.
+    await conserver(donnees)
+    redirect(`/profil?erreur=${encodeURIComponent(echec)}`)
+  }
+  await oublier()
   journaliser('profil_valide')
   redirect('/offres')
 }
