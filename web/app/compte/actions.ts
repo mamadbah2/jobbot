@@ -4,7 +4,7 @@ import { cookies } from 'next/headers'
 import { redirect } from 'next/navigation'
 
 import { ErreurApi, NOM_COOKIE } from '../api-contrat'
-import { deconnecter } from '../api-client'
+import { deconnecter, supprimerMesDonnees } from '../api-client'
 import { journaliser } from '../journal'
 
 export async function seDeconnecter(): Promise<void> {
@@ -27,5 +27,19 @@ export async function seDeconnecter(): Promise<void> {
   magasin.delete({ name: NOM_COOKIE, path: '/' })
 
   journaliser('deconnexion')
+  redirect('/connexion')
+}
+
+export async function supprimerMonCompte(): Promise<void> {
+  try {
+    await supprimerMesDonnees()
+  } catch (erreur) {
+    // Compte déjà supprimé ou session périmée : le résultat voulu est atteint.
+    if (!(erreur instanceof ErreurApi)) throw erreur
+  }
+  // Mêmes attributs que `seDeconnecter` : sans `path`, le navigateur garde le cookie.
+  const magasin = await cookies()
+  magasin.delete({ name: NOM_COOKIE, path: '/' })
+  journaliser('donnees_supprimees')
   redirect('/connexion')
 }

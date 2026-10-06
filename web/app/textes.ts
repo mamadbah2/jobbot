@@ -26,6 +26,9 @@ export const CODES_ERREUR = [
   'trop_d_analyses',
   'analyse_indisponible',
   'profil_absent',
+  'analyse_interrompue',
+  'image_expiree',
+  'analyse_echouee',
   'erreur_metier',
   'defaut',
 ] as const
@@ -52,6 +55,11 @@ export const ERREURS: Record<string, string> = {
   trop_d_analyses: "Vous avez déjà analysé plusieurs CV aujourd'hui. Revenez demain.",
   analyse_indisponible: "L'analyse n'est pas disponible pour le moment. Réessayez dans quelques minutes.",
   profil_absent: "Déposez d'abord votre CV.",
+  // Ces trois-là ne sont pas des exceptions Python : ils viennent de
+  // `parse_erreur`, écrit par la tâche d'analyse en arrière-plan.
+  analyse_interrompue: "L'analyse n'a pas abouti. Déposez à nouveau votre CV.",
+  image_expiree: "L'analyse a pris trop de temps. Déposez à nouveau votre CV.",
+  analyse_echouee: "Nous n'avons pas réussi à analyser ce CV. Déposez-en un autre.",
   erreur_metier: "Une erreur est survenue. Réessayez.",
   defaut: "Une erreur est survenue. Réessayez.",
 }
@@ -92,6 +100,37 @@ export const T = {
   lienOffres: 'Les offres',
   lienCompte: 'Mon compte',
 
+  titreProfil: 'Votre CV',
+  aideDepot: "Déposez votre CV en PDF, en Word, ou prenez-en une photo.",
+  // Sur l'écran de DÉPÔT, pas seulement dans une page de politique : un
+  // utilisateur a le droit de savoir, avant de confier son CV, qu'il part chez
+  // un tiers hors du Sénégal.
+  avertissementDeepSeek:
+    "Pour lire votre CV, nous l'envoyons à notre prestataire d'analyse, hors du Sénégal. Rien n'est conservé de votre fichier d'origine.",
+  champFichier: 'Votre CV',
+  boutonDeposer: 'Analyser mon CV',
+  analyseEnCours: "Nous lisons votre CV. Cette page se met à jour toute seule.",
+  titreValidation: 'Vérifiez votre profil',
+  aideValidation: "Corrigez ce qui est faux, puis choisissez ce que vous cherchez.",
+  boutonValider: 'Enregistrer',
+  redeposerCv: 'Déposer un autre CV',
+  lienProfil: 'Mon CV',
+  lienConfidentialite: 'Vos données',
+  titreSuppression: 'Supprimer mes données',
+  aideSuppression:
+    "Votre compte, votre CV et votre profil seront supprimés immédiatement. C'est définitif.",
+  boutonSupprimer: 'Supprimer définitivement mes données',
+  champNomProfil: 'Votre nom',
+  champTitre: 'Le poste que vous cherchez',
+  champCompetences: 'Vos compétences, séparées par des virgules',
+  champLangues: 'Vos langues, séparées par des virgules',
+  legendeSecteurs: 'Les secteurs qui vous intéressent',
+  champRegion: 'Où cherchez-vous ?',
+  champContrat: 'Quel type de contrat ?',
+  titreLecture: 'Ce que nous avons lu dans votre CV',
+  aucuneLecture: 'Aucune expérience ni formation détectée.',
+  siFaux: "Si c'est faux,",
+
   // Panne réseau ou serveur pendant le chargement d'un écran (§11 : toujours
   // une sortie, même quand tout casse). On dit quoi faire, jamais ce qui a
   // cassé.
@@ -124,3 +163,18 @@ const ETATS: Record<string, string> = {
 export function etatLisible(etat: string): string {
   return ETATS[etat] ?? 'État inconnu'
 }
+
+/** Choix proposés sur l'écran de profil : des boutons, jamais de saisie
+ *  libre (§6). Ici et non dans la page, car ce sont des libellés affichés. */
+export const SECTEURS = [
+  'Comptabilité et finance',
+  'Informatique',
+  'Commerce et vente',
+  'Santé',
+  'Éducation',
+  'Logistique et transport',
+  'Bâtiment',
+  'Humanitaire et ONG',
+]
+export const REGIONS = ['Dakar', 'Thiès', 'Saint-Louis', 'Ziguinchor', 'Kaolack', 'Tout le Sénégal']
+export const CONTRATS = ['CDI', 'CDD', 'Stage', 'Freelance']

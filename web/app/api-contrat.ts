@@ -22,6 +22,12 @@ export type Offre = {
   methode_candidature: string
 }
 
+export type Profil = {
+  etat: 'absent' | 'en_attente' | 'en_cours' | 'pret' | 'echec'
+  erreur: string | null
+  structured: Record<string, unknown> | null
+}
+
 export type PageOffres = { offres: Offre[]; total: number }
 
 /** `maxAge` optionnel : absent, le cookie devient un cookie de session, que le

@@ -171,6 +171,12 @@ def test_le_web_recoit_tout_ce_qu_il_lit_dans_l_environnement() -> None:
     )
 
 
+def test_le_web_recoit_le_plafond_de_taille_du_cv() -> None:
+    """Lu par `next.config.ts`, hors de `web/app/` : le test de couverture
+    des clés ne le voit pas, d'où cette assertion dédiée."""
+    assert "CV_TAILLE_MAX_MO" in SERVICES["web"]["environment"]
+
+
 def test_le_web_ne_fait_pas_confiance_au_proxy_par_defaut() -> None:
     """Fermé par défaut. Rien ne se tient devant `web` : à `true`, le
     X-Forwarded-For relayé serait celui que le client a écrit lui-même, et les
