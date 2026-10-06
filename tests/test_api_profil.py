@@ -730,3 +730,110 @@ async def test_corriger_pendant_une_analyse_en_vol_ne_la_court_circuite_pas(
     assert reponse.status_code == 200
     assert reponse.json()["etat"] == "en_cours", "une analyse en vol ne doit pas passer à pret"
     assert client_auth.get("/profil").json()["etat"] == "en_cours"
+
+
+@pytest.mark.integration
+async def test_lattente_en_file_ne_se_deduit_pas_du_delai_de_lanalyse(
+    client_auth: TestClient,
+    fournisseur_courriel_espion: FournisseurCourrielEspion,
+    harnais: Harnais,
+    base_profils_test: async_sessionmaker[AsyncSession],
+) -> None:
+    """`_demarrer` remet `parse_demarre_le` à l'heure quand la place est obtenue.
+
+    Sans cette remise à l'heure, l'horloge de péremption (`core/cv_etat.py`)
+    resterait posée à l'instant du DÉPÔT : le temps passé en file d'attente se
+    déduirait du délai de l'analyse, et un CV qui a attendu plus de
+    `CV_ANALYSE_DELAI_MAX_SECONDES` serait annoncé perdu à l'utilisateur alors
+    que DeepSeek est en train de le lire. Le plafond de simultanéité (4 places)
+    rend cette attente ordinaire dès qu'il y a de l'affluence.
+    """
+    from datetime import UTC, datetime, timedelta
+
+    from sqlalchemy import select
+
+    from src.api.routers import profil as routeur
+    from src.config import get_settings
+    from src.db.models import Profile
+
+    _connecter(client_auth, fournisseur_courriel_espion)
+    uid = await _uid(base_profils_test)
+
+    # Un dépôt qui a fait une longue queue : plus vieux que le délai maximal.
+    attente = get_settings().cv_analyse_delai_max_secondes + 60
+    depose_le = datetime.now(UTC) - timedelta(seconds=attente)
+    async with base_profils_test() as s:
+        await routeur.preparer_profil(s, uid, depose_le)
+        await s.commit()
+
+    debut = await routeur._demarrer(uid, depose_le)
+    assert debut is not None
+    assert debut > depose_le, "l'horloge doit repartir à l'acquisition de la place"
+
+    async with base_profils_test() as s:
+        ligne = (await s.execute(select(Profile).where(Profile.user_id == uid))).scalar_one()
+    assert ligne.parse_demarre_le == debut
+
+    # Ce que l'utilisateur voit : son CV est en lecture, pas perdu.
+    vu = client_auth.get("/profil").json()
+    assert (vu["etat"], vu["erreur"]) == ("en_cours", None)
+
+
+@pytest.mark.integration
+async def test_le_depot_est_valide_avant_que_la_tache_de_fond_ne_parte(
+    client_auth: TestClient,
+    fournisseur_courriel_espion: FournisseurCourrielEspion,
+    harnais: Harnais,
+    base_profils_test: async_sessionmaker[AsyncSession],
+    faux_cache: Any,
+) -> None:
+    """`deposer_cv` valide SA session avant `_planifier`.
+
+    La tâche de fond ouvre sa propre session : tant que la ligne `en_attente`
+    n'est pas validée, elle lui est invisible, son `UPDATE` de démarrage ne
+    promeut rien, et le dépôt est perdu jusqu'à péremption — sans que rien ne
+    le dise. Les tests qui passent par HTTP ne le voient pas : la dépendance de
+    session valide en fin de requête, et l'ordonnancement de la boucle leur
+    donne raison la plupart du temps. On appelle donc la route en direct, avec
+    une session que le test ne valide JAMAIS : seul le commit interne compte.
+    """
+    import asyncio
+    import io
+
+    from fastapi import UploadFile
+    from sqlalchemy import select
+
+    from src.api.routers import profil as routeur
+    from src.config import get_settings
+    from src.db.models import Profile, User
+
+    _connecter(client_auth, fournisseur_courriel_espion)
+    async with base_profils_test() as s:
+        compte = (await s.execute(select(User).where(User.email == ADRESSE))).scalar_one()
+
+    contenu = docx_avec_texte("Awa Diop comptable chez Alpha SARL depuis 2019. " * 20)
+    fichier = UploadFile(file=io.BytesIO(contenu), filename="cv.docx", size=len(contenu))
+
+    avant = set(routeur._TACHES_DE_FOND)
+    async with base_profils_test() as session_de_requete:
+        vue = await routeur.deposer_cv(
+            utilisateur=compte,
+            session=session_de_requete,
+            cache=faux_cache,
+            settings=get_settings(),
+            fichier=fichier,
+        )
+        assert vue.etat == "en_attente"
+        # On ne valide pas `session_de_requete` : si `deposer_cv` ne l'a pas
+        # fait lui-même, la ligne n'existe pour personne d'autre.
+        taches = set(routeur._TACHES_DE_FOND) - avant
+        assert len(taches) == 1
+        await asyncio.gather(*taches)
+
+    async with base_profils_test() as s:
+        ligne = (
+            await s.execute(select(Profile).where(Profile.user_id == compte.id))
+        ).scalar_one_or_none()
+    assert ligne is not None, "le dépôt n'a jamais été validé : la tâche n'a rien pu promouvoir"
+    assert ligne.parse_etat == "pret"
+    assert harnais.analyse.appels, "l'analyse n'a jamais été lancée"
