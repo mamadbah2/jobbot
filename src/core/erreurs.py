@@ -34,6 +34,12 @@ class ErreurMetier(Exception):
     """Racine des erreurs métier. `code` identifie le cas pour les clients."""
 
     code = "erreur_metier"
+    # Dollars DÉJÀ dépensés quand l'erreur est levée, le cas échéant. Porté ici
+    # et non par la seule `CvIllisible` parce que la dépense peut survivre à
+    # n'importe quel échec : un premier appel facturé, puis une panne de
+    # DeepSeek sur le second (`AnalyseIndisponible`). Un coût qui ne voyage pas
+    # avec l'exception est un coût que `usage_counters` ne verra jamais (§9).
+    cout: Decimal | None = None
 
 
 class AdresseInvalide(ErreurMetier, ValueError):
@@ -129,7 +135,12 @@ class TropDAnalyses(ErreurMetier):
 
 
 class AnalyseIndisponible(ErreurMetier):
-    """DeepSeek est injoignable. Le quota n'est pas décompté (§9)."""
+    """DeepSeek est injoignable. Le quota n'est pas décompté (§9).
+
+    Rendre la place et consigner le coût sont deux décisions INDÉPENDANTES :
+    l'utilisateur n'a rien reçu, donc sa place lui revient, mais une première
+    tentative facturée avant la panne reste de l'argent dépensé — elle voyage
+    dans `cout` (hérité de `ErreurMetier`)."""
 
     code = "analyse_indisponible"
 

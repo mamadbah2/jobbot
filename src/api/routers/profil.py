@@ -294,8 +294,12 @@ async def _analyser_sous_plafond(
                 cout_usd=None if cout_perdu is None else str(cout_perdu),
             )
             if isinstance(exc, AnalyseIndisponible):
-                # Rien n'a été payé : le quota n'est pas décompté (§9). Un échec
-                # qui a coûté de l'argent, lui, garde sa place consommée.
+                # L'utilisateur n'a RIEN reçu : sa place lui est rendue (§9). Un
+                # échec qui lui a rendu un résultat inutilisable, lui, garde sa
+                # place consommée (`CvIllisible`). Rendre la place et consigner
+                # la dépense sont deux décisions indépendantes : une première
+                # tentative facturée avant la panne voyage dans `cout` et part
+                # quand même dans `usage_counters`, juste en dessous.
                 await _liberer_sans_fuite(client, user_id, settings)
             await _echec_sans_fuite(user_id, code, cout_perdu, demarre_le)
             return

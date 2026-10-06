@@ -232,3 +232,61 @@ async def test_refuse_une_image_pour_un_modele_texte_seul() -> None:
         )
 
 
+async def test_le_cout_dun_premier_appel_survit_a_une_panne_sur_le_second() -> None:
+    """IMPORTANT I-3 : tentative 1 FACTURÉE mais illisible, puis tentative 2 qui
+    lève — le montant déjà dépensé ne doit pas partir avec l'exception, sinon
+    `usage_counters` ne voit jamais de l'argent réellement sorti (§9)."""
+    from src.core.erreurs import AnalyseIndisponible
+
+    essais: list[int] = []
+
+    async def appeler(messages: Any, **_: Any) -> tuple[str, CoutAppel]:
+        essais.append(1)
+        if len(essais) == 1:
+            return "ceci n'est pas du json", COUT
+        raise AnalyseIndisponible
+
+    with pytest.raises(AnalyseIndisponible) as leve:
+        await analyser_cv(texte="x", appeler=appeler)
+
+    assert len(essais) == 2
+    assert leve.value.cout == COUT.cout_usd
+    # Rien de la réponse (qui porte le CV) ne doit avoir servi de contexte.
+    assert leve.value.__context__ is None
+
+
+async def test_une_panne_sur_le_premier_appel_ne_fabrique_pas_de_cout() -> None:
+    """Le symétrique : rien n'a été facturé, donc `cout` reste vide — sinon on
+    imputerait à l'utilisateur une dépense qui n'a pas eu lieu."""
+    from src.core.erreurs import AnalyseIndisponible
+
+    async def appeler(messages: Any, **_: Any) -> tuple[str, CoutAppel]:
+        raise AnalyseIndisponible
+
+    with pytest.raises(AnalyseIndisponible) as leve:
+        await analyser_cv(texte="x", appeler=appeler)
+
+    assert leve.value.cout is None
+
+
+async def test_le_cout_dun_appel_interrompu_ne_fuite_pas_le_cv() -> None:
+    """Le journal de ce chemin ne porte qu'un montant et un nom de type : la
+    réponse déjà reçue, elle, contient le CV."""
+    from src.core.erreurs import AnalyseIndisponible
+
+    secret = "Awa Diop, comptable chez Alpha SARL"
+    essais: list[int] = []
+
+    async def appeler(messages: Any, **_: Any) -> tuple[str, CoutAppel]:
+        essais.append(1)
+        if len(essais) == 1:
+            return secret, COUT
+        raise AnalyseIndisponible
+
+    with capture_logs() as journal, pytest.raises(AnalyseIndisponible):
+        await analyser_cv(texte=secret, appeler=appeler)
+
+    rendu = repr(journal)
+    assert "cv_appel_interrompu_apres_paiement" in rendu
+    assert secret not in rendu
+    assert "Alpha SARL" not in rendu

@@ -13,7 +13,7 @@ from collections.abc import Awaitable, Callable
 from decimal import Decimal
 from typing import Any
 
-from src.core.erreurs import CvIllisible
+from src.core.erreurs import CvIllisible, ErreurMetier
 from src.llm.client import CoutAppel, modele_lit_les_images
 from src.llm.prompts import PROMPT_CV, TEMPERATURE_CV, VERSION_PROMPT_CV
 from src.logging_setup import get_logger
@@ -150,7 +150,29 @@ async def analyser_cv(
     total = CoutAppel(0, 0, 0, Decimal(0))
 
     for tentative in (1, 2):
-        contenu, cout = await appeler(messages, temperature=TEMPERATURE_CV)
+        try:
+            contenu, cout = await appeler(messages, temperature=TEMPERATURE_CV)
+        except Exception as exc:
+            # La tentative précédente a pu être FACTURÉE : son montant doit
+            # survivre à l'exception, sinon il disparaît du suivi de marge (§9)
+            # — de l'argent réellement dépensé chez DeepSeek que
+            # `usage_counters` ne verrait jamais. Le remboursement du quota,
+            # lui, se décide ailleurs et séparément : ce sont deux questions
+            # distinctes.
+            if total.cout_usd > 0:
+                # Montant et type seulement : la réponse déjà reçue porte le CV.
+                log.error(
+                    "cv_appel_interrompu_apres_paiement",
+                    tentative=tentative,
+                    type_erreur=type(exc).__name__,
+                    cout_usd=str(total.cout_usd),
+                    version_prompt=VERSION_PROMPT_CV,
+                )
+                if isinstance(exc, ErreurMetier):
+                    exc.cout = (exc.cout or Decimal(0)) + total.cout_usd
+            # `raise` NU, jamais une nouvelle exception : levée dans ce bloc,
+            # elle garderait l'originale en `__context__`, message compris.
+            raise
         total = CoutAppel(
             total.tokens_entree_cache + cout.tokens_entree_cache,
             total.tokens_entree_frais + cout.tokens_entree_frais,

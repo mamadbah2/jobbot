@@ -706,3 +706,39 @@ async def test_le_plafond_de_simultaneite_borne_les_analyses_en_vol(
         await asyncio.gather(*taches)
 
     assert maximum == places, f"{maximum} analyses simultanées pour un plafond de {places}"
+
+
+@pytest.mark.integration
+async def test_une_panne_apres_un_appel_paye_rend_la_place_ET_consigne_le_cout(
+    client_auth: TestClient,
+    fournisseur_courriel_espion: FournisseurCourrielEspion,
+    harnais: _Harnais,
+    base_profils_test: async_sessionmaker[AsyncSession],
+) -> None:
+    """IMPORTANT I-3, bout en bout : premier appel facturé puis illisible,
+    second appel qui lève `AnalyseIndisponible`. Les deux décisions sont
+    indépendantes — la place du quota revient à l'utilisateur (il n'a rien reçu)
+    ET la dépense réelle apparaît dans `usage_counters`."""
+    from decimal import Decimal
+
+    from sqlalchemy import select
+
+    from src.core.erreurs import AnalyseIndisponible
+    from src.db.models import UsageCounter
+
+    panne = AnalyseIndisponible()
+    panne.cout = Decimal("0.0003")  # ce que `analyser_cv` y dépose (I-3)
+    harnais.analyse.exception = panne
+
+    _connecter(client_auth, fournisseur_courriel_espion)
+    uid = await _uid(base_profils_test)
+    client_auth.post("/profil/cv", files={"fichier": ("photo.jpg", JPEG)})
+    corps = _attendre_fin(client_auth)
+
+    assert (corps["etat"], corps["erreur"]) == ("echec", "analyse_indisponible")
+    assert _place_du_jour(harnais.cache) == 0, "la place doit être rendue"
+    async with base_profils_test() as s:
+        ligne = (
+            await s.execute(select(UsageCounter).where(UsageCounter.user_id == uid))
+        ).scalar_one()
+    assert ligne.cost_usd == Decimal("0.0003"), "la dépense réelle doit être consignée"
