@@ -470,9 +470,29 @@ async def corriger_profil(
     corps: CorrectionProfil,
     utilisateur: Annotated[User, Depends(deps.utilisateur_courant)],
     session: Annotated[AsyncSession, Depends(deps.session_db)],
+    settings: Annotated[Settings, Depends(deps.reglages)],
 ) -> ProfilVu:
     """Corrections et préférences dans la même soumission : chaque étape coûte
-    des abandons et un aller-retour payé en data (§11)."""
+    des abandons et un aller-retour payé en data (§11).
+
+    Un enregistrement réussi remet l'état à `pret` et efface `parse_erreur` :
+    sans cela, un redépôt raté laissait « Nous n'avons pas réussi à lire ce
+    CV… » en rouge sur `/profil` POUR TOUJOURS, y compris après que
+    l'utilisateur a réparé son profil à la main. Annoncer en permanence un
+    échec à quelqu'un qui vient de corriger est une affirmation fausse, sur
+    l'écran central du produit.
+
+    La remise à `pret` ne court-circuite PAS la garde optimiste : elle n'a lieu
+    que si l'état AFFICHÉ n'est plus en vol. On passe par `etat_affiche`, et
+    non par `parse_etat` brut, pour les deux raisons symétriques :
+    - une analyse réellement en vol (`en_attente`/`en_cours`, horloge encore
+      fraîche) garde son état : elle finira et écrira son résultat sous sa
+      propre garde `parse_demarre_le`. Lui coller un `pret` ferait clignoter
+      l'écran entre deux vérités ;
+    - une analyse `en_cours` PÉRIMÉE est déjà présentée comme un échec par
+      `GET /profil`. Sans ce passage par la même règle, son bandeau serait
+      resté lui aussi définitif — le défaut corrigé ici, par une autre porte.
+    """
     profil = await _profil_de(session, utilisateur.id)
     if profil is None or profil.structured is None:
         raise ProfilAbsent
@@ -484,4 +504,15 @@ async def corriger_profil(
     for champ, valeur in corps.model_dump(exclude_unset=True).items():
         structure[champ] = valeur
     profil.structured = structure
+
+    etat, _erreur = etat_affiche(
+        profil.parse_etat,
+        profil.parse_demarre_le,
+        profil.parse_erreur,
+        maintenant=datetime.now(UTC),
+        delai_max_secondes=settings.cv_analyse_delai_max_secondes,
+    )
+    if etat not in ("en_attente", "en_cours"):
+        profil.parse_etat = "pret"
+        profil.parse_erreur = None
     return _vue(profil)

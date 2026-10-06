@@ -658,3 +658,75 @@ async def test_une_panne_apres_un_appel_paye_rend_la_place_ET_consigne_le_cout(
             await s.execute(select(UsageCounter).where(UsageCounter.user_id == uid))
         ).scalar_one()
     assert ligne.cost_usd == Decimal("0.0003"), "la dépense réelle doit être consignée"
+
+
+@pytest.mark.integration
+def test_un_profil_corrige_a_la_main_efface_le_bandeau_dechec(
+    client_auth: TestClient,
+    fournisseur_courriel_espion: FournisseurCourrielEspion,
+    harnais: Harnais,
+) -> None:
+    """Le défaut : `corriger_profil` ne remettait jamais `parse_etat` à `pret`.
+
+    Un redépôt raté laissait « Nous n'avons pas réussi à lire ce CV… » en rouge
+    sur `/profil` POUR TOUJOURS — y compris après que l'utilisateur a réparé son
+    profil à la main. Le scénario est bien celui d'un REDÉPÔT : le premier CV a
+    rempli `structured`, sans quoi `PUT /profil` répondrait `profil_absent`.
+    """
+    _connecter(client_auth, fournisseur_courriel_espion)
+    contenu = docx_avec_texte("Awa Diop comptable chez Alpha SARL depuis 2019. " * 20)
+
+    # 1. Un premier CV analysé avec succès : le profil existe.
+    r = client_auth.post("/profil/cv", files={"fichier": ("cv.docx", contenu)})
+    assert r.status_code == 202
+    assert _attendre_fin(client_auth)["etat"] == "pret"
+
+    # 2. Un redépôt qui échoue : le profil précédent reste, le bandeau s'affiche.
+    harnais.analyse.exception = RuntimeError("DeepSeek a rendu n'importe quoi")
+    r = client_auth.post("/profil/cv", files={"fichier": ("cv.docx", contenu)})
+    assert r.status_code == 202
+    rate = _attendre_fin(client_auth)
+    assert (rate["etat"], rate["erreur"]) == ("echec", "analyse_echouee")
+
+    # 3. L'utilisateur corrige son profil à la main, et ça passe.
+    reponse = client_auth.put("/profil", json={"nom_complet": "Awa Diop", "titre": "Comptable"})
+    assert reponse.status_code == 200
+    assert (reponse.json()["etat"], reponse.json()["erreur"]) == ("pret", None)
+
+    # 4. L'écran, au rechargement suivant, n'annonce plus un échec.
+    vu = client_auth.get("/profil").json()
+    assert (vu["etat"], vu["erreur"]) == ("pret", None)
+    assert vu["structured"]["titre"] == "Comptable"
+
+
+@pytest.mark.integration
+async def test_corriger_pendant_une_analyse_en_vol_ne_la_court_circuite_pas(
+    client_auth: TestClient,
+    fournisseur_courriel_espion: FournisseurCourrielEspion,
+    base_profils_test: async_sessionmaker[AsyncSession],
+) -> None:
+    """L'autre moitié de la décision : une analyse RÉELLEMENT en vol garde son
+    état. La remise à `pret` ne vaut que pour un état qui n'attend plus rien —
+    sinon l'écran clignoterait entre deux vérités, et la garde optimiste de
+    `parse_demarre_le` se ferait doubler par une correction manuelle."""
+    from datetime import UTC, datetime
+
+    from src.db.models import Profile
+
+    _connecter(client_auth, fournisseur_courriel_espion)
+    uid = await _uid(base_profils_test)
+    async with base_profils_test() as s:
+        s.add(
+            Profile(
+                user_id=uid,
+                parse_etat="en_cours",
+                parse_demarre_le=datetime.now(UTC),  # horloge fraîche : pas périmée
+                structured={"nom_complet": "Awa Diop"},
+            )
+        )
+        await s.commit()
+
+    reponse = client_auth.put("/profil", json={"titre": "Comptable"})
+    assert reponse.status_code == 200
+    assert reponse.json()["etat"] == "en_cours", "une analyse en vol ne doit pas passer à pret"
+    assert client_auth.get("/profil").json()["etat"] == "en_cours"
