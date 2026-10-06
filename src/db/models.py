@@ -36,6 +36,7 @@ PLANS: Final = ("free", "pro")
 SUBSCRIPTION_STATUSES: Final = ("active", "expired", "pending")
 APPLY_METHODS: Final = ("email", "form", "external")
 APPLICATION_STATUSES: Final = ("draft", "sent", "failed", "bounced")
+PARSE_ETATS: Final = ("en_attente", "en_cours", "pret", "echec")
 
 
 def _check_in(column: str, values: tuple[str, ...], name: str) -> CheckConstraint:
@@ -85,6 +86,7 @@ class User(TimestampMixin, Base):
 
 class Profile(Base):
     __tablename__ = "profiles"
+    __table_args__ = (_check_in("parse_etat", PARSE_ETATS, "ck_profiles_parse_etat"),)
 
     id: Mapped[int] = mapped_column(primary_key=True)
     user_id: Mapped[int] = mapped_column(
@@ -94,7 +96,16 @@ class Profile(Base):
     # expériences, formations, compétences, langues, secteurs visés, mobilité,
     # prétention salariale. Sert de source de vérité au post-contrôle anti-invention (§8.5).
     structured: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
-    cv_file_path: Mapped[str | None] = mapped_column(String(512))
+    # `VARCHAR` + `CHECK` et non un ENUM natif : ajouter une valeur à un ENUM
+    # impose une migration bloquante (§5).
+    parse_etat: Mapped[str] = mapped_column(
+        String(16), default="en_attente", server_default="en_attente", nullable=False
+    )
+    # Un CODE, jamais une phrase : les textes vivent chez le client (§4).
+    parse_erreur: Mapped[str | None] = mapped_column(String(64))
+    # Rend inutile tout balayeur de tâches zombies : passé le délai, l'écran
+    # présente l'analyse comme échouée (spec §6).
+    parse_demarre_le: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
     )
