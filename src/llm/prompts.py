@@ -9,6 +9,10 @@ from __future__ import annotations
 
 VERSION_PROMPT_CV = "cv-parser-v1"
 
+# §9 : température basse pour une extraction de données structurées. Plus haut,
+# le modèle comble les trous, c'est-à-dire invente (§8.5).
+TEMPERATURE_CV = 0.3
+
 # Le JSON attendu est décrit en entier dans le prompt : un modèle à qui l'on
 # demande « un JSON du profil » rend une forme différente à chaque appel, et la
 # Phase 5 traitera `structured` comme source de vérité (§8.5).
