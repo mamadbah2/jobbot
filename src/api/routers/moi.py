@@ -9,11 +9,17 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Response, status
+from sqlalchemy import delete
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.api import deps
 from src.api.schemas.auth import Utilisateur
+from src.config import Settings
 from src.db.models import User
+from src.logging_setup import get_logger
+
+log = get_logger(__name__)
 
 router = APIRouter(tags=["moi"])
 
@@ -23,3 +29,46 @@ async def moi(
     utilisateur: Annotated[User, Depends(deps.utilisateur_courant)],
 ) -> Utilisateur:
     return Utilisateur.depuis(utilisateur)
+
+
+@router.delete("/moi", status_code=status.HTTP_204_NO_CONTENT)
+async def supprimer_mes_donnees(
+    response: Response,
+    utilisateur: Annotated[User, Depends(deps.utilisateur_courant)],
+    session: Annotated[AsyncSession, Depends(deps.session_db)],
+    settings: Annotated[Settings, Depends(deps.reglages)],
+) -> None:
+    """Supprime le compte et tout ce qui en dépend (§14.4).
+
+    `profiles`, `applications`, `subscriptions` et `usage_counters` portent
+    `ondelete="CASCADE"` sur `user_id` : supprimer la ligne `users` emporte le
+    CV et le profil structuré. Immédiat, sans corbeille — c'est ce que
+    « supprimer mes données » veut dire.
+
+    Le cookie est effacé dans la même réponse : laisser un jeton valide pointer
+    vers un compte disparu enverrait l'utilisateur sur un 401 inexpliqué au
+    prochain écran plutôt que sur la page de connexion.
+    """
+    user_id = utilisateur.id
+    # Un `DELETE` SQL et non `session.delete(utilisateur)` : l'ORM, qui connaît
+    # `User.profile` sans cascade, mettrait `profiles.user_id` à NULL avant de
+    # supprimer l'utilisateur, et la base refuserait (NOT NULL). Constaté : la
+    # route répondait 204, le commit échouait APRÈS la réponse, et le compte
+    # restait. Ici c'est la base qui cascade, comme la migration le déclare.
+    await session.execute(delete(User).where(User.id == user_id))
+    # Valider avant de répondre : un 204 doit vouloir dire « c'est effacé », pas
+    # « le commit de fin de requête essaiera ». Sans cela, un échec de commit
+    # surviendrait une fois la réponse partie, invisible du client.
+    await session.commit()
+    # Les attributs de suppression doivent refléter ceux de la pose, sinon le
+    # navigateur garde un cookie fantôme (défaut déjà rencontré en Phase 2).
+    response.delete_cookie(
+        settings.cookie_session_nom,
+        path="/",
+        httponly=True,
+        samesite="lax",
+        secure=settings.cookie_session_secure,
+    )
+    # L'identifiant seulement : l'adresse est une donnée personnelle, et on
+    # vient précisément de promettre de l'effacer.
+    log.info("compte_supprime", user_id=user_id)
