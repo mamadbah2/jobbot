@@ -43,6 +43,17 @@ _TACHES_DE_FOND: set[asyncio.Task[None]] = set()
 _PREFIXE_IMAGE = "jobbot:cv:image"
 
 
+def cle_image_cv(user_id: int) -> str:
+    """Clé Redis de l'image d'un CV en attente d'analyse.
+
+    Déterministe, sans horodatage : `DELETE /moi` doit pouvoir l'effacer en O(1)
+    sans `SCAN`. Deux dépôts simultanés se la disputent, mais la garde optimiste
+    sur `parse_demarre_le` fait déjà perdre le plus ancien (`image_expiree`).
+    """
+    return f"{_PREFIXE_IMAGE}:{user_id}"
+
+
+
 def _vue(profil: Profile | None) -> ProfilVu:
     if profil is None:
         return ProfilVu(etat="absent")
@@ -347,7 +358,7 @@ async def deposer_cv(
         # sauvegarde (spec §8). Le disque n'est pas touché non plus : le fichier
         # reçu reste en mémoire parce que `spool_max_size` est relevé au plafond
         # du CV (cf. `create_app`).
-        cle_image = f"{_PREFIXE_IMAGE}:{utilisateur.id}:{datetime.now(UTC).timestamp()}"
+        cle_image = cle_image_cv(utilisateur.id)
         await cache.set(cle_image, contenu, ex=settings.cv_image_ttl_secondes)
     else:
         texte = cv_fichier.extraire_texte(

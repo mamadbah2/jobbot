@@ -53,8 +53,14 @@ def test_la_suppression_emporte_le_profil(
         "/profil/cv",
         files={"fichier": ("cv.docx", _docx("Awa Diop comptable Alpha SARL 2019. " * 20))},
     )
+    nom = get_settings().cookie_session_nom
+    jeton = client_auth.cookies.get(nom)
+    assert jeton
     assert client_auth.delete("/moi").status_code == 204
-    # Le jeton ne vaut plus rien : la ligne `users` a disparu.
+    # Le client a effacé son cookie : sans le reposer, le 401 ne prouverait que
+    # cela. On présente donc l'ANCIEN jeton, encore valide en signature : seul le
+    # compte absent peut le faire refuser.
+    client_auth.cookies.set(nom, jeton)
     assert client_auth.get("/profil").status_code == 401
 
 
@@ -204,3 +210,29 @@ async def test_compte_supprime_pendant_une_analyse_ne_plante_pas_et_ne_fuit_pas(
     # Ni l'adresse ni le contenu du CV ne sortent dans le journal.
     assert ADRESSE not in sortie
     assert "transcription" not in sortie
+
+
+@pytest.mark.integration
+async def test_la_suppression_emporte_l_image_du_cv_en_attente(
+    client_auth: TestClient,
+    fournisseur_courriel_espion: FournisseurCourrielEspion,
+    faux_cache: FauxCache,
+    base_utilisateurs_test: async_sessionmaker[AsyncSession],
+) -> None:
+    """L'image brute d'un CV est la donnée la plus sensible du produit : si le
+    process meurt avant que la tâche de fond la consomme, elle survivrait dix
+    minutes à une suppression annoncée immédiate."""
+    from sqlalchemy import select
+
+    from src.api.routers.profil import cle_image_cv
+    from src.db.models import User
+
+    _connecter(client_auth, fournisseur_courriel_espion)
+    async with base_utilisateurs_test() as s:
+        uid = (await s.execute(select(User.id).where(User.email == ADRESSE))).scalar_one()
+    cle = cle_image_cv(uid)
+    await faux_cache.set(cle, b"\xff\xd8\xff octets bruts", ex=600)
+
+    assert client_auth.delete("/moi").status_code == 204
+
+    assert await faux_cache.get(cle) is None

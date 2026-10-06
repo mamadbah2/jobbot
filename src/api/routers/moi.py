@@ -14,8 +14,11 @@ from sqlalchemy import delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.api import deps
+from src.api.routers.auth import effacer_cookie
+from src.api.routers.profil import cle_image_cv
 from src.api.schemas.auth import Utilisateur
 from src.config import Settings
+from src.core.cache import CacheRedis
 from src.db.models import User
 from src.logging_setup import get_logger
 
@@ -37,6 +40,7 @@ async def supprimer_mes_donnees(
     utilisateur: Annotated[User, Depends(deps.utilisateur_courant)],
     session: Annotated[AsyncSession, Depends(deps.session_db)],
     settings: Annotated[Settings, Depends(deps.reglages)],
+    cache: Annotated[CacheRedis, Depends(deps.cache_redis)],
 ) -> None:
     """Supprime le compte et tout ce qui en dépend (§14.4).
 
@@ -60,15 +64,10 @@ async def supprimer_mes_donnees(
     # « le commit de fin de requête essaiera ». Sans cela, un échec de commit
     # surviendrait une fois la réponse partie, invisible du client.
     await session.commit()
-    # Les attributs de suppression doivent refléter ceux de la pose, sinon le
-    # navigateur garde un cookie fantôme (défaut déjà rencontré en Phase 2).
-    response.delete_cookie(
-        settings.cookie_session_nom,
-        path="/",
-        httponly=True,
-        samesite="lax",
-        secure=settings.cookie_session_secure,
-    )
+    # L'image brute d'un CV en attente d'analyse : la donnée la plus sensible du
+    # produit. Clé déterministe, donc un `DELETE` en O(1) (pas de `SCAN`).
+    await cache.delete(cle_image_cv(user_id))
+    effacer_cookie(response, settings)
     # L'identifiant seulement : l'adresse est une donnée personnelle, et on
     # vient précisément de promettre de l'effacer.
     log.info("compte_supprime", user_id=user_id)

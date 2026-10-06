@@ -203,7 +203,10 @@ def demander_code_verification(
     client: TestClient, espion: FournisseurCourrielEspion, adresse: str
 ) -> str:
     """Déclenche `/auth/code/demande` et renvoie le code intercepté par l'espion."""
-    client.post("/auth/code/demande", json={"email": adresse})
+    r = client.post("/auth/code/demande", json={"email": adresse})
+    # Un rejet de cadence (429) doit échouer ICI, lisiblement, et non plus loin
+    # sous la forme d'un code déjà consommé.
+    assert r.status_code == 202, r.text
     return espion.envois[-1][1]
 
 
