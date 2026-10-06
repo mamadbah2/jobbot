@@ -176,7 +176,7 @@ def test_le_parcours_du_cv_ne_fuite_pas_son_contenu_dans_les_logs(
     part. Le pipeline de ce fichier est le seul qui le prouve : `capsys` ne voit
     pas ce que voit un collecteur de journaux (cf. en-tête).
     """
-    import src.alerting as alerting
+    from src.api import deps
 
     class _AlerteEspionne:
         def __init__(self) -> None:
@@ -186,7 +186,14 @@ def test_le_parcours_du_cv_ne_fuite_pas_son_contenu_dans_les_logs(
             self.envois.append((evenement, contexte))
 
     espion_alerte = _AlerteEspionne()
-    monkeypatch.setattr(alerting, "construire_alerte", lambda _s: espion_alerte)
+    # `src.api.deps`, et NON `src.alerting` : `deps.py` fait
+    # `from src.alerting import construire_alerte`, donc le nom est déjà lié
+    # dans SON module. Remplacer l'original en amont ne change plus rien pour
+    # le process `api`, et l'assertion `espion_alerte.envois == []` serait
+    # alors vraie quoi qu'il arrive — décorative, et crue porteuse par le
+    # lecteur suivant. `deps.alerte` est le SEUL point de construction du
+    # canal dans `api` (`auth.py` l'injecte par `Depends(deps.alerte)`).
+    monkeypatch.setattr(deps, "construire_alerte", lambda _s: espion_alerte)
 
     code = demander_code_verification(client_auth, fournisseur_courriel_espion, ADRESSE_CV)
     assert (
