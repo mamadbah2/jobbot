@@ -180,16 +180,25 @@ export const TAILLE_MAX_BROUILLON = 3500
 
 /** La saisie en cours, conservée le temps d'un aller-retour d'erreur — même
  *  mécanisme que `COOKIE_ADRESSE` : sans JavaScript, un `redirect` perd ce qui a
- *  été tapé, et un formulaire de profil retapé est un abandon (§11). */
+ *  été tapé, et un formulaire de profil retapé est un abandon (§11).
+ *
+ *  BASE64URL, et c'est le point délicat : `cookies().set` de Next encode la
+ *  valeur qu'on lui donne, alors que `cookies().get` rend la valeur BRUTE, sans
+ *  la décoder. Du JSON posé tel quel revient donc percent-encodé et illisible —
+ *  constaté en vrai, le brouillon ne se rappliquait jamais. Base64url n'emploie
+ *  aucun caractère qu'`encodeURIComponent` toucherait : ce qui est écrit est
+ *  exactement ce qui revient, et la taille mesurée ici est celle du cookie. */
 export function serialiserBrouillon(donnees: BrouillonProfil): string | null {
-  const encode = encodeURIComponent(JSON.stringify(donnees))
+  const encode = Buffer.from(JSON.stringify(donnees), 'utf8').toString('base64url')
   return encode.length > TAILLE_MAX_BROUILLON ? null : encode
 }
 
 export function lireBrouillon(valeur: string | undefined): BrouillonProfil | null {
   if (!valeur) return null
   try {
-    const brut = JSON.parse(decodeURIComponent(valeur)) as Partial<BrouillonProfil>
+    const brut = JSON.parse(
+      Buffer.from(valeur, 'base64url').toString('utf8'),
+    ) as Partial<BrouillonProfil>
     const liste = (v: unknown): string[] =>
       Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : []
     const texte = (v: unknown): string | null => (typeof v === 'string' ? v : null)

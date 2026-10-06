@@ -211,8 +211,27 @@ test('un brouillon trop gros pour un cookie est abandonné, jamais tronqué', ()
 })
 
 test('un cookie de brouillon trafiqué ne casse pas l’écran', () => {
-  assert.equal(lireBrouillon('pas du json'), null)
+  assert.equal(lireBrouillon('pas du base64url valide !!'), null)
   assert.equal(lireBrouillon(undefined), null)
   // Un JSON valide mais de mauvaise forme donne des listes vides, pas un plantage.
-  assert.deepEqual(lireBrouillon(encodeURIComponent('{"competences": 3}'))?.competences, [])
+  const tordu = Buffer.from('{"competences": 3}', 'utf8').toString('base64url')
+  assert.deepEqual(lireBrouillon(tordu)?.competences, [])
+})
+
+test('un brouillon sérialisé ne contient que des caractères sûrs pour un cookie', () => {
+  // `cookies().set` encode ce qu'on lui donne, `cookies().get` ne décode RIEN :
+  // tout caractère qu'`encodeURIComponent` toucherait reviendrait illisible, et
+  // le brouillon ne se rappliquerait jamais. Défaut constaté en vrai.
+  const valeur = serialiserBrouillon({
+    nom_complet: 'Awa Diop, « comptable » & fière de l’être',
+    titre: null,
+    competences: ['SAGE/Excel', 'français + wolof'],
+    langues: [],
+    secteurs_vises: [],
+    mobilite: null,
+    type_contrat: null,
+  })
+  assert.ok(valeur)
+  assert.equal(encodeURIComponent(valeur), valeur)
+  assert.equal(lireBrouillon(valeur)?.nom_complet, 'Awa Diop, « comptable » & fière de l’être')
 })
