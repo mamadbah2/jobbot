@@ -15,3 +15,6 @@ data/
 
 # Workspace des exécutions de plan (subagent-driven development)
 .superpowers/
+
+# Traces du navigateur pilotées par Playwright
+.playwright-mcp/

@@ -5,9 +5,9 @@ import { envoyerCode } from './actions'
 export default async function PageConnexion({
   searchParams,
 }: {
-  searchParams: Promise<{ erreur?: string }>
+  searchParams: Promise<{ erreur?: string; supprime?: string }>
 }) {
-  const { erreur } = await searchParams
+  const { erreur, supprime } = await searchParams
   const message = texteErreur(erreur)
 
   // Première marche du parcours. Les autres évènements viennent tous de
@@ -21,6 +21,7 @@ export default async function PageConnexion({
     <main>
       <h1>{T.titreAdresse}</h1>
       <p>{T.aideAdresse}</p>
+      {supprime === '1' && <p role="status">{T.donneesSupprimees}</p>}
       {message && <p className="erreur">{message}</p>}
       <form action={envoyerCode}>
         <label htmlFor="adresse">{T.champAdresse}</label>

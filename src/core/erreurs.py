@@ -7,6 +7,8 @@ apparaître ici.
 
 from __future__ import annotations
 
+from decimal import Decimal
+
 __all__ = [
     "ErreurMetier",
     "AdresseInvalide",
@@ -18,6 +20,13 @@ __all__ = [
     "JetonInvalide",
     "NomInvalide",
     "EnvoiImpossible",
+    "CvTypeRefuse",
+    "CvTropGros",
+    "CvSansTexte",
+    "CvIllisible",
+    "TropDAnalyses",
+    "AnalyseIndisponible",
+    "ProfilAbsent",
 ]
 
 
@@ -25,6 +34,12 @@ class ErreurMetier(Exception):
     """Racine des erreurs métier. `code` identifie le cas pour les clients."""
 
     code = "erreur_metier"
+    # Dollars DÉJÀ dépensés quand l'erreur est levée, le cas échéant. Porté ici
+    # et non par la seule `CvIllisible` parce que la dépense peut survivre à
+    # n'importe quel échec : un premier appel facturé, puis une panne de
+    # DeepSeek sur le second (`AnalyseIndisponible`). Un coût qui ne voyage pas
+    # avec l'exception est un coût que `usage_counters` ne verra jamais (§9).
+    cout: Decimal | None = None
 
 
 class AdresseInvalide(ErreurMetier, ValueError):
@@ -75,3 +90,68 @@ class EnvoiImpossible(ErreurMetier):
     """Le fournisseur d'email a échoué. L'utilisateur peut réessayer."""
 
     code = "envoi_impossible"
+
+
+class CvTypeRefuse(ErreurMetier):
+    """Le fichier n'est ni un PDF, ni un DOCX, ni une image JPEG ou PNG."""
+
+    code = "cv_type_refuse"
+
+
+class CvTropGros(ErreurMetier):
+    code = "cv_trop_gros"
+
+
+class CvSansTexte(ErreurMetier):
+    """Document sans texte exploitable : PDF scanné, page blanche.
+
+    Levée AVANT tout appel au LLM : c'est le seul moment où l'on peut refuser
+    sans rien payer.
+    """
+
+    code = "cv_sans_texte"
+
+
+class CvIllisible(ErreurMetier):
+    """Deux situations, même code parce que la sortie est la même (redéposer) :
+
+    1. fichier annoncé valide par ses octets de tête mais inexploitable — PDF
+       chiffré, archive tronquée, ZIP qui n'est pas un document Word ;
+    2. analyse menée à son terme mais dont la réponse reste illisible après
+       relance (`llm/cv_parser.py`), et qui a donc coûté de l'argent.
+
+    Le libellé du client web doit rester juste dans les deux cas."""
+
+    code = "cv_illisible"
+
+    def __init__(self, cout: Decimal | None = None) -> None:
+        super().__init__(self.code)
+        # Dollars déjà dépensés quand l'analyse abandonne après relance : deux
+        # appels payés ne doivent pas disparaître du suivi de marge. Un attribut
+        # et non une sous-classe : le statut HTTP se résout par type exact.
+        self.cout = cout
+
+
+class TropDAnalyses(ErreurMetier):
+    """Plafond d'analyses du jour atteint. Distinct de `TropDeDemandes` :
+    l'utilisateur n'a rien fait d'abusif, il a simplement épuisé un quota de
+    coût, et le message à lui afficher n'est pas le même."""
+
+    code = "trop_d_analyses"
+
+
+class AnalyseIndisponible(ErreurMetier):
+    """DeepSeek est injoignable. Le quota n'est pas décompté (§9).
+
+    Rendre la place et consigner le coût sont deux décisions INDÉPENDANTES :
+    l'utilisateur n'a rien reçu, donc sa place lui revient, mais une première
+    tentative facturée avant la panne reste de l'argent dépensé — elle voyage
+    dans `cout` (hérité de `ErreurMetier`)."""
+
+    code = "analyse_indisponible"
+
+
+class ProfilAbsent(ErreurMetier):
+    """Correction demandée alors qu'aucun CV n'a jamais été déposé."""
+
+    code = "profil_absent"

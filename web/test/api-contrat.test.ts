@@ -1,8 +1,28 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 
-import { ipCliente, lireCookieSession, attributsCookieSession } from '../app/api-contrat.ts'
-import { etatLisible, texteErreur, CODES_ERREUR, ERREURS } from '../app/textes.ts'
+import {
+  ipCliente,
+  lireCookieSession,
+  attributsCookieSession,
+  attributsCookieBrouillon,
+  effacementCookieBrouillon,
+  appliquerBrouillon,
+  brouillonDepuisStructured,
+  differenceBrouillon,
+  listeTropLongue,
+  lireBrouillon,
+  serialiserBrouillon,
+  COOKIE_BROUILLON,
+  LIMITES_LISTES,
+} from '../app/api-contrat.ts'
+import {
+  etatLisible,
+  texteErreur,
+  texteTropDeValeurs,
+  CODES_ERREUR,
+  ERREURS,
+} from '../app/textes.ts'
 import { codeConnu } from '../app/journal.ts'
 
 test("ipCliente ne garde que la première IP de la chaîne", () => {
@@ -108,4 +128,233 @@ test('un Max-Age nul ou négatif est traité comme absent', () => {
     entetes.append('set-cookie', `jobbot_session=x; ${brut}; Path=/`)
     assert.equal(lireCookieSession(entetes)?.maxAge, undefined, `non traité : ${brut}`)
   }
+})
+
+test('listeTropLongue nomme la liste qui déborde, et de combien', () => {
+  // Le cas réel : un CV qui donne 60 compétences. Sans ce contrôle, l'API
+  // répond un 422 de pydantic sans clé `erreur` et l'écran n'a rien à dire.
+  const donnees = {
+    nom_complet: 'Awa Diop',
+    titre: null,
+    competences: Array.from({ length: 60 }, (_, i) => `competence ${i}`),
+    langues: ['français'],
+    secteurs_vises: [],
+    mobilite: null,
+    type_contrat: null,
+  }
+  assert.deepEqual(listeTropLongue(donnees), {
+    champ: 'competences',
+    saisi: 60,
+    limite: LIMITES_LISTES.competences,
+  })
+})
+
+test('listeTropLongue laisse passer une liste pile à la limite', () => {
+  const donnees = {
+    nom_complet: null,
+    titre: null,
+    competences: Array.from({ length: LIMITES_LISTES.competences }, (_, i) => `c${i}`),
+    langues: Array.from({ length: LIMITES_LISTES.langues }, (_, i) => `l${i}`),
+    secteurs_vises: Array.from({ length: LIMITES_LISTES.secteurs_vises }, (_, i) => `s${i}`),
+    mobilite: null,
+    type_contrat: null,
+  }
+  assert.equal(listeTropLongue(donnees), null)
+})
+
+test('le message de dépassement nomme la liste, la limite et le nombre à retirer', () => {
+  const message = texteTropDeValeurs('competences', 60, 50)
+  assert.match(message, /compétences/)
+  assert.match(message, /50/)
+  assert.match(message, /10/)
+  // Jamais le nom de colonne : ce n'est pas du français (§11).
+  assert.ok(!message.includes('competences'))
+})
+
+test('un brouillon fait l’aller-retour par le cookie sans rien perdre', () => {
+  const donnees = {
+    nom_complet: 'Awa Diop',
+    titre: 'Comptable, à Dakar & ailleurs',
+    competences: ['SAGE', 'Excel'],
+    langues: ['français', 'wolof'],
+    secteurs_vises: ['Comptabilité et finance'],
+    mobilite: 'Dakar',
+    type_contrat: 'CDI',
+  }
+  const valeur = serialiserBrouillon(donnees)
+  assert.ok(valeur)
+  assert.deepEqual(lireBrouillon(valeur), donnees)
+})
+
+test('un champ vidé par l’utilisateur reste vide au retour', () => {
+  // La saisie fait foi EN BLOC : sans cela, effacer un champ serait annulé par
+  // la valeur enregistrée, et l'utilisateur ne pourrait jamais rien supprimer.
+  const valeur = serialiserBrouillon({
+    nom_complet: null,
+    titre: null,
+    competences: [],
+    langues: [],
+    secteurs_vises: [],
+    mobilite: null,
+    type_contrat: null,
+  })
+  assert.deepEqual(lireBrouillon(valeur!)?.nom_complet, null)
+})
+
+test('un brouillon trop gros pour un cookie est abandonné, jamais tronqué', () => {
+  // Un cookie de plus de 4 Ko est jeté par le navigateur SANS erreur : poser
+  // un brouillon ingérable ferait perdre la saisie sans que personne ne le voie.
+  const enorme = {
+    nom_complet: null,
+    titre: null,
+    competences: Array.from({ length: 50 }, () => 'x'.repeat(200)),
+    langues: [],
+    secteurs_vises: [],
+    mobilite: null,
+    type_contrat: null,
+  }
+  assert.equal(serialiserBrouillon(enorme), null)
+})
+
+test('un cookie de brouillon trafiqué ne casse pas l’écran', () => {
+  assert.equal(lireBrouillon('pas du base64url valide !!'), null)
+  assert.equal(lireBrouillon(undefined), null)
+  // Un JSON valide mais de mauvaise forme donne des listes vides, pas un plantage.
+  const tordu = Buffer.from('{"competences": 3}', 'utf8').toString('base64url')
+  assert.deepEqual(lireBrouillon(tordu)?.competences, [])
+})
+
+test('un brouillon sérialisé ne contient que des caractères sûrs pour un cookie', () => {
+  // `cookies().set` encode ce qu'on lui donne, `cookies().get` ne décode RIEN :
+  // tout caractère qu'`encodeURIComponent` toucherait reviendrait illisible, et
+  // le brouillon ne se rappliquerait jamais. Défaut constaté en vrai.
+  const valeur = serialiserBrouillon({
+    nom_complet: 'Awa Diop, « comptable » & fière de l’être',
+    titre: null,
+    competences: ['SAGE/Excel', 'français + wolof'],
+    langues: [],
+    secteurs_vises: [],
+    mobilite: null,
+    type_contrat: null,
+  })
+  assert.ok(valeur)
+  assert.equal(encodeURIComponent(valeur), valeur)
+  assert.equal(lireBrouillon(valeur)?.nom_complet, 'Awa Diop, « comptable » & fière de l’être')
+})
+
+/** Des libellés de compétences RÉELS, en français, tels qu'un CV de comptable
+ *  sénégalais en donne. Moyenne : 37 signes. Les anciens tests employaient
+ *  `c0`, `Comp00` — des valeurs qui n'approchent jamais la borne du cookie, et
+ *  qui ne pouvaient donc pas voir la perte silencieuse. */
+const COMPETENCES_REELLES = [
+  'Gestion administrative et financière',
+  'Comptabilité générale et analytique',
+  'Élaboration des états financiers annuels',
+  'Déclarations fiscales et sociales',
+  'Suivi budgétaire et contrôle de gestion',
+  'Rapprochements bancaires mensuels',
+  'Gestion de la paie et des bulletins',
+  'Négociation avec les fournisseurs étrangers',
+  'Tenue des livres comptables de la filiale',
+  'Préparation et suivi des audits annuels',
+  'Recouvrement des créances clients',
+  'Gestion des immobilisations corporelles',
+]
+
+function profilDeSoixanteCompetences(nom: string) {
+  return {
+    nom_complet: nom,
+    titre: 'Chef comptable',
+    competences: Array.from(
+      { length: 60 },
+      (_, i) => COMPETENCES_REELLES[i % COMPETENCES_REELLES.length]!,
+    ),
+    langues: ['français', 'wolof', 'anglais'],
+    secteurs_vises: ['Comptabilité et finance'],
+    mobilite: 'Dakar',
+    type_contrat: 'CDI',
+  }
+}
+
+test('la correction d’un champ simple survit à 60 compétences réalistes', () => {
+  // Le scénario EXACT que le brouillon devait couvrir : l'utilisateur corrige
+  // son nom, soumet, et reçoit « vous avez 60 compétences, retirez-en 10 ».
+  // Avec le profil entier dans le cookie, le brouillon franchissait la borne,
+  // était jeté, et le nom d'avant revenait — sans un mot.
+  const enregistre = profilDeSoixanteCompetences('Awa Diop')
+  const saisi = profilDeSoixanteCompetences('Awa Diop Ndiaye')
+
+  // D'abord : ces valeurs franchissent BIEN le seuil. Un test qui reste sous la
+  // borne ne prouverait rien.
+  assert.equal(
+    serialiserBrouillon(saisi),
+    null,
+    'valeurs de test trop courtes : elles ne reproduisent pas le défaut',
+  )
+
+  // Ensuite : réduit à ce qui a changé, le brouillon tient — et tout revient.
+  const valeur = serialiserBrouillon(differenceBrouillon(saisi, enregistre))
+  assert.ok(valeur, 'la correction doit pouvoir être conservée')
+  assert.ok(valeur.length < 200, `brouillon inutilement gros : ${valeur.length} octets`)
+  assert.deepEqual(appliquerBrouillon(lireBrouillon(valeur), enregistre), saisi)
+})
+
+test('un champ vidé exprès reste vide, même quand le reste ne bouge pas', () => {
+  // La règle que l'ancien « le brouillon fait foi en bloc » protégeait : une
+  // suppression volontaire ne doit jamais être annulée par la valeur
+  // enregistrée. Un champ vidé DIFFÈRE de la référence, donc il entre dans le
+  // brouillon — et le `null` l'emporte au recollage.
+  const enregistre = profilDeSoixanteCompetences('Awa Diop')
+  const saisi = { ...profilDeSoixanteCompetences('Awa Diop'), titre: null, langues: [] }
+
+  const diff = differenceBrouillon(saisi, enregistre)
+  assert.deepEqual(Object.keys(diff).sort(), ['langues', 'titre'])
+  const valeur = serialiserBrouillon(diff)
+  assert.ok(valeur)
+  const relu = appliquerBrouillon(lireBrouillon(valeur), enregistre)
+  assert.equal(relu.titre, null)
+  assert.deepEqual(relu.langues, [])
+  assert.deepEqual(relu.competences, enregistre.competences)
+})
+
+test('sans profil de référence, le brouillon porte tout', () => {
+  // Repli quand l'API ne répond pas pendant l'aller-retour d'erreur : on ne
+  // peut rien recoller, donc on garde tout. La borne reprend ses droits, et
+  // c'est alors à l'appelant de dire que la saisie n'a pas été conservée.
+  const saisi = profilDeSoixanteCompetences('Awa Diop Ndiaye')
+  assert.deepEqual(differenceBrouillon(saisi, null), saisi)
+  assert.equal(serialiserBrouillon(differenceBrouillon(saisi, null)), null)
+})
+
+test('un brouillon absent laisse le profil enregistré intact', () => {
+  const enregistre = profilDeSoixanteCompetences('Awa Diop')
+  assert.deepEqual(appliquerBrouillon(null, enregistre), enregistre)
+})
+
+test('brouillonDepuisStructured ignore ce qui n’est pas du bon type', () => {
+  // `structured` vient de l'API, donc d'un LLM : rien n'y garantit les types.
+  const vu = brouillonDepuisStructured({
+    nom_complet: 'Awa Diop',
+    titre: 42,
+    competences: ['Excel', 7, null],
+    langues: 'français',
+  })
+  assert.equal(vu.nom_complet, 'Awa Diop')
+  assert.equal(vu.titre, null)
+  assert.deepEqual(vu.competences, ['Excel'])
+  assert.deepEqual(vu.langues, [])
+})
+
+test("le cookie de brouillon ne remonte que sur l'écran qui s'en sert", () => {
+  // Sur `path: '/'`, un cookie de 3,5 Ko qui vit 15 minutes repartait avec
+  // TOUTES les requêtes, les fragments `/_next/` compris : de l'ordre de 25 Ko
+  // d'émission par chargement de page, sur une data comptée (§11). Invisible
+  // pour `mesure-poids.mjs`, qui ne compte que la descente.
+  assert.equal(attributsCookieBrouillon().path, '/profil')
+  // Et l'effacement vise le MÊME chemin : un navigateur n'efface un cookie que
+  // si le chemin correspond. Sans cela, le brouillon d'un essai précédent se
+  // rappliquerait indéfiniment sur l'écran.
+  const effacement = effacementCookieBrouillon()
+  assert.equal(effacement.path, attributsCookieBrouillon().path)
+  assert.equal(effacement.name, COOKIE_BROUILLON)
 })

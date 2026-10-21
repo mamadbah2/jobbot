@@ -30,6 +30,17 @@ export type Etape =
   | 'code_refuse'
   | 'connexion_reussie'
   | 'deconnexion'
+  | 'vue_profil_absent'
+  | 'vue_profil_pret'
+  | 'vue_profil_echec'
+  | 'cv_depose'
+  | 'cv_refuse'
+  | 'profil_trop_long'
+  // La saisie n'a pas tenu dans un cookie, même réduite aux changements :
+  // l'utilisateur en est averti à l'écran, et on veut savoir si ça arrive.
+  | 'profil_brouillon_perdu'
+  | 'profil_valide'
+  | 'donnees_supprimees'
 
 /** Le seul détail qu'une étape ait le droit de porter : un code d'erreur de
  *  notre propre API, pris dans une liste fermée. */

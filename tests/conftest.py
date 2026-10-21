@@ -60,14 +60,14 @@ class FauxCache:
     """
 
     def __init__(self) -> None:
-        self.valeurs: dict[str, str] = {}
+        self.valeurs: dict[str, Any] = {}
         self.ttl: dict[str, int] = {}
 
     async def get(self, name: str) -> str | None:
         return self.valeurs.get(name)
 
     async def set(
-        self, name: str, value: str, *, ex: int | None = None, nx: bool = False
+        self, name: str, value: str | bytes, *, ex: int | None = None, nx: bool = False
     ) -> bool:
         if nx and name in self.valeurs:
             return False
@@ -82,6 +82,11 @@ class FauxCache:
             efface += 1 if self.valeurs.pop(name, None) is not None else 0
             self.ttl.pop(name, None)
         return efface
+
+    async def decr(self, name: str) -> int:
+        valeur = int(self.valeurs.get(name, "0")) - 1
+        self.valeurs[name] = str(valeur)
+        return valeur
 
     async def incr(self, name: str) -> int:
         valeur = int(self.valeurs.get(name, "0")) + 1
@@ -198,8 +203,21 @@ def demander_code_verification(
     client: TestClient, espion: FournisseurCourrielEspion, adresse: str
 ) -> str:
     """Déclenche `/auth/code/demande` et renvoie le code intercepté par l'espion."""
-    client.post("/auth/code/demande", json={"email": adresse})
+    r = client.post("/auth/code/demande", json={"email": adresse})
+    # Un rejet de cadence (429) doit échouer ICI, lisiblement, et non plus loin
+    # sous la forme d'un code déjà consommé.
+    assert r.status_code == 202, r.text
     return espion.envois[-1][1]
+
+
+@pytest_asyncio.fixture
+async def base_profils_test(
+    base_utilisateurs_test: async_sessionmaker[AsyncSession],
+) -> AsyncIterator[async_sessionmaker[AsyncSession]]:
+    """`profiles` est purgée par la cascade de `users` (`ondelete="CASCADE"`),
+    que `base_utilisateurs_test` déclenche déjà sur `%@jobbot-test.sn`.
+    Ce fixture n'existe que pour rendre la dépendance explicite."""
+    yield base_utilisateurs_test
 
 
 SOURCE_TEST = "jobbot-test"
@@ -279,3 +297,106 @@ async def offres_test(
     async with base_utilisateurs_test() as s:
         await s.execute(delete(Job).where(Job.source == SOURCE_TEST))
         await s.commit()
+
+
+# --- Harnais de la tâche de fond -------------------------------------------
+#
+# `client_auth` remplace `deps.cache_redis` par un `FauxCache`, mais la tâche de
+# fond ouvre SON client. Sans ce harnais, l'image écrite par la route n'est
+# jamais là où la tâche la cherche : tout le chemin photo restait non vérifié.
+
+
+class ClientPartage:
+    """Client de la tâche de fond, branché sur le MÊME `FauxCache` que la route."""
+
+    def __init__(self, cache: Any) -> None:
+        self._cache = cache
+        self.ttl_vus: dict[str, int | None] = {}
+
+    async def get(self, name: str) -> Any:
+        self.ttl_vus[name] = self._cache.ttl.get(name)
+        return await self._cache.get(name)
+
+    async def delete(self, *names: str) -> Any:
+        return await self._cache.delete(*names)
+
+    async def incr(self, name: str) -> int:
+        return await self._cache.incr(name)
+
+    async def decr(self, name: str) -> int:
+        return await self._cache.decr(name)
+
+    async def aclose(self) -> None:
+        return None
+
+
+class AnalyseDouble:
+    """Double de `analyser_cv` : jamais de réseau, jamais de DeepSeek."""
+
+    def __init__(self) -> None:
+        self.appels: list[dict[str, Any]] = []
+        self.exception: Exception | None = None
+        # Réglables : un test de non-fuite doit pouvoir y mettre son marqueur
+        # de CV et vérifier qu'il ne ressort nulle part.
+        self.profil: dict[str, Any] = {
+            "nom_complet": "Awa Diop",
+            "competences": ["Excel"],
+            "telephone": "770000000",
+        }
+        self.transcription = "transcription"
+
+    async def __call__(self, **kw: Any) -> Any:
+        from decimal import Decimal
+
+        from src.llm.client import CoutAppel
+
+        self.appels.append(kw)
+        if self.exception is not None:
+            raise self.exception
+        return self.profil, self.transcription, CoutAppel(10, 5, 3, Decimal("0.0001"))
+
+
+class Harnais:
+    def __init__(self, analyse: AnalyseDouble, client: ClientPartage, cache: Any) -> None:
+        self.analyse = analyse
+        self.client = client
+        self.cache = cache
+
+
+@pytest.fixture
+def harnais(
+    monkeypatch: pytest.MonkeyPatch,
+    faux_cache: Any,
+    base_profils_test: async_sessionmaker[AsyncSession],
+) -> Harnais:
+    from contextlib import asynccontextmanager
+
+    from src.api.routers import profil as routeur
+
+    analyse = AnalyseDouble()
+    client = ClientPartage(faux_cache)
+
+    @asynccontextmanager
+    async def _scope() -> AsyncIterator[AsyncSession]:
+        async with base_profils_test() as s:
+            yield s
+            await s.commit()
+
+    monkeypatch.setattr(routeur, "analyser_cv", analyse)
+    monkeypatch.setattr(routeur, "_ouvrir_redis", lambda: client)
+    monkeypatch.setattr(routeur, "session_scope", _scope)
+    return Harnais(analyse, client, faux_cache)
+
+
+def docx_avec_texte(texte: str) -> bytes:
+    """Un vrai .docx en mémoire : les tests de dépôt doivent passer par la même
+    extraction que la production, pas par un faux fichier."""
+    import io
+
+    from docx import Document
+
+    doc = Document()
+    doc.add_paragraph(texte)
+    tampon = io.BytesIO()
+    doc.save(tampon)
+    return tampon.getvalue()

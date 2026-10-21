@@ -9,18 +9,27 @@ from __future__ import annotations
 
 from fastapi import FastAPI, Request, status
 from fastapi.responses import JSONResponse
+from starlette.formparsers import MultiPartParser
 
-from src.api.routers import auth, moi, offres, sante
+from src.api.routers import auth, moi, offres, profil, sante
+from src.config import get_settings
 from src.core.erreurs import (
     AdresseInvalide,
+    AnalyseIndisponible,
     CodeExpire,
     CodeInvalide,
+    CvIllisible,
+    CvSansTexte,
+    CvTropGros,
+    CvTypeRefuse,
     EnvoiImpossible,
     ErreurMetier,
     InscriptionIncomplete,
     JetonInvalide,
     NomInvalide,
     PlafondGlobalAtteint,
+    ProfilAbsent,
+    TropDAnalyses,
     TropDeDemandes,
 )
 from src.logging_setup import get_logger
@@ -30,9 +39,13 @@ log = get_logger(__name__)
 # Les bornes des schémas pydantic n'agissent qu'après le parsing complet du
 # corps : sur un endpoint public non authentifié, ça laisse n'importe qui
 # faire lire des mégaoctets au serveur avant tout rejet. 64 Ko est très large
-# pour du JSON d'authentification ; l'upload de CV de la Phase 3 aura sa
-# propre limite, plus haute, propre à sa route.
+# pour du JSON d'authentification ; l'upload de CV a sa propre limite, plus
+# haute, propre à sa route.
 TAILLE_CORPS_MAX = 64 * 1024
+# L'enveloppe multipart (frontières, en-têtes de partie) s'ajoute au fichier :
+# sans marge, un fichier pile à la limite serait refusé par le middleware.
+MARGE_MULTIPART = 64 * 1024
+ROUTE_CV = "/profil/cv"
 
 # Chaque erreur métier a un statut HTTP, et un seul. Le défaut est 400 :
 # une erreur non listée est une faute de saisie, pas une panne serveur.
@@ -51,10 +64,22 @@ _STATUTS: dict[type[ErreurMetier], int] = {
     # pas le défaut 400 par omission (revue finale, corrections mineures).
     CodeInvalide: status.HTTP_400_BAD_REQUEST,
     CodeExpire: status.HTTP_400_BAD_REQUEST,
+    CvTypeRefuse: status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+    CvTropGros: status.HTTP_413_CONTENT_TOO_LARGE,
+    CvSansTexte: status.HTTP_422_UNPROCESSABLE_CONTENT,
+    CvIllisible: status.HTTP_422_UNPROCESSABLE_CONTENT,
+    TropDAnalyses: status.HTTP_429_TOO_MANY_REQUESTS,
+    AnalyseIndisponible: status.HTTP_503_SERVICE_UNAVAILABLE,
+    ProfilAbsent: status.HTTP_409_CONFLICT,
 }
 
 
 def create_app() -> FastAPI:
+    # Starlette bascule une pièce jointe de la mémoire vers un VRAI fichier
+    # temporaire au-delà de 1 Mio : une photo de 3 Mo toucherait le disque, ce que
+    # la spec §8 interdit pour un CV. Plafonné au maximum accepté, tout fichier
+    # reste en mémoire.
+    MultiPartParser.spool_max_size = get_settings().cv_taille_max_octets + MARGE_MULTIPART
     # docs/redoc/openapi désactivés : surface d'attaque inutile ici, les seuls
     # clients de cette API sont écrits dans ce même dépôt.
     app = FastAPI(title="JobBot", docs_url=None, redoc_url=None, openapi_url=None)
@@ -108,13 +133,23 @@ def create_app() -> FastAPI:
                     status_code=status.HTTP_411_LENGTH_REQUIRED,
                     content={"erreur": "longueur_requise"},
                 )
+            # `/profil/cv` porte un fichier : sa borne est CV_TAILLE_MAX_MO.
+            # Le plafond global de 64 Ko reste la règle pour tout le reste.
+            est_cv = request.url.path == ROUTE_CV
+            plafond = (
+                get_settings().cv_taille_max_octets + MARGE_MULTIPART
+                if est_cv
+                else TAILLE_CORPS_MAX
+            )
             try:
-                if int(longueur) > TAILLE_CORPS_MAX:
+                if int(longueur) > plafond:
                     raise ValueError
             except ValueError:
+                # Le code propre à la route : le client web a un texte pour
+                # `cv_trop_gros`, pas pour `corps_trop_grand`.
                 return JSONResponse(
                     status_code=status.HTTP_413_CONTENT_TOO_LARGE,
-                    content={"erreur": "corps_trop_grand"},
+                    content={"erreur": "cv_trop_gros" if est_cv else "corps_trop_grand"},
                 )
         return await appeler_suite(request)
 
@@ -122,4 +157,5 @@ def create_app() -> FastAPI:
     app.include_router(auth.router)
     app.include_router(moi.router)
     app.include_router(offres.router)
+    app.include_router(profil.router)
     return app

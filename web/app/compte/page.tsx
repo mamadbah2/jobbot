@@ -22,7 +22,8 @@ export default async function PageCompte() {
   return (
     <main>
       <nav>
-        <a href="/offres">{T.lienOffres}</a>
+        <a href="/offres">{T.lienOffres}</a> · <a href="/profil">{T.lienProfil}</a> ·{' '}
+        <a href="/confidentialite">{T.lienConfidentialite}</a>
       </nav>
       <h1>{T.titreCompte}</h1>
       <p>
@@ -37,6 +38,9 @@ export default async function PageCompte() {
       <form action={seDeconnecter}>
         <button type="submit">{T.boutonDeconnexion}</button>
       </form>
+      <p className="issue-secours">
+        <a href="/compte/supprimer">{T.titreSuppression}</a>
+      </p>
     </main>
   )
 }

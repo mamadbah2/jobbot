@@ -100,6 +100,26 @@ class Settings(BaseSettings):
     ingest_fraicheur_minutes: int = Field(default=30, ge=1)
     ingest_verrou_secondes: int = Field(default=600, ge=60)
 
+    # --- Profil et analyse de CV (Phase 3) ---
+    # La clé était déjà dans le `.env` local mais n'avait aucun champ ici :
+    # `extra="ignore"` l'avalait en silence. SecretStr et non str, pour qu'elle
+    # ne ressorte pas dans un `repr(Settings)` au démarrage ou dans une trace.
+    deepseek_api_key: SecretStr = SecretStr("")
+    # Configurable pour pouvoir monter vers `deepseek-v4-pro` sans redéployer du
+    # code. Attention : `v4-pro` ne lit PAS les images (relevé le 2026-10-01).
+    deepseek_modele: str = "deepseek-flash"
+    cv_taille_max_mo: int = Field(default=5, ge=1, le=20)
+    # Un PDF scanné rend rarement zéro caractère : il rend quelques artefacts de
+    # police. « Vide » ne serait donc pas un test suffisant.
+    cv_texte_min_caracteres: int = Field(default=200, ge=1)
+    cv_analyses_par_jour: int = Field(default=5, ge=1)
+    cv_image_ttl_secondes: int = Field(default=600, ge=60)
+    cv_analyse_delai_max_secondes: int = Field(default=300, ge=30)
+
+    @property
+    def cv_taille_max_octets(self) -> int:
+        return self.cv_taille_max_mo * 1024 * 1024
+
     scraper_user_agent: str = "JobBotSN/0.1 (+contact: admin@example.sn)"
     scraper_delay_seconds: float = Field(default=4.0, ge=3.0)
 

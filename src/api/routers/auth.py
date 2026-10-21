@@ -145,6 +145,20 @@ def poser_cookie(response: Response, utilisateur: User, settings: Settings) -> N
     )
 
 
+def effacer_cookie(response: Response, settings: Settings) -> None:
+    """Efface le cookie de session. Voisin de `poser_cookie` à dessein : un
+    navigateur n'efface que si `path`, `secure` et `samesite` correspondent à la
+    pose, sinon un cookie fantôme reste (Phase 2). Un attribut ajouté à l'un se
+    corrige donc ici, à côté."""
+    response.delete_cookie(
+        settings.cookie_session_nom,
+        path="/",
+        httponly=True,
+        samesite="lax",
+        secure=settings.cookie_session_secure,
+    )
+
+
 @router.post("/code/verifie")
 async def verifier_code(
     corps: VerificationCode,
@@ -221,15 +235,4 @@ async def deconnexion(
 ) -> None:
     """Invalide TOUS les jetons du compte, pas seulement celui-ci (spec §5)."""
     await comptes.revoquer_jetons(session, utilisateur)
-    # `secure` et `samesite` doivent reprendre ceux posés par `poser_cookie` :
-    # un navigateur n'efface le cookie que si les attributs correspondent,
-    # sinon un cookie fantôme reste (round de correction 1, tâche 14). Sans
-    # conséquence de sécurité ici — la révocation tient à `token_version`,
-    # pas à la suppression du cookie.
-    response.delete_cookie(
-        settings.cookie_session_nom,
-        path="/",
-        httponly=True,
-        samesite="lax",
-        secure=settings.cookie_session_secure,
-    )
+    effacer_cookie(response, settings)

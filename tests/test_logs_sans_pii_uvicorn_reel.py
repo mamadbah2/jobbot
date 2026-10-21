@@ -14,8 +14,8 @@ erreur SQLAlchemy (adresse, numéro, §14.4).
 
 Ce test monte donc un VRAI serveur uvicorn dans un process séparé (pas
 `TestClient`), avec une route qui lève une exception dont le message contient
-une adresse et un numéro, capture la sortie du process, et vérifie qu'aucun
-des deux n'y figure, ni le mot « Traceback ».
+une adresse, un numéro et un fragment de CV, capture la sortie du process, et
+vérifie qu'aucun des trois n'y figure, ni le mot « Traceback ».
 
 Lancer avec : RUN_INTEGRATION_TESTS=1 pytest -m integration
 """
@@ -35,6 +35,11 @@ RACINE_DEPOT = Path(__file__).resolve().parents[1]
 
 ADRESSE = "fatou@jobbot-preuve.sn"
 TEL = "+221771234567"
+# Le contenu d'un CV court exactement le même risque que l'adresse : c'est
+# `profiles.raw_cv_text` que la tâche d'analyse écrit, donc le texte entier du
+# CV qui se retrouve dans les paramètres liés d'une erreur SQLAlchemy — et sur
+# stdout avec elle si le filtre `SansTrace` venait à sauter.
+MARQUEUR_CV = "Ndeye-Sow-Marqueur-De-CV-Confidentiel"
 
 _SCRIPT_SERVEUR = '''
 import sys
@@ -52,7 +57,7 @@ app = create_app()
 @app.get("/fuite-test")
 async def _lever_une_exception_avec_pii() -> None:
     raise RuntimeError(
-        "SQL error [parameters: ({adresse!r}, {tel!r})]"
+        "SQL error [parameters: ({adresse!r}, {tel!r}, {cv!r})]"
     )
 
 
@@ -86,13 +91,14 @@ def _attendre_demarrage(host: str, port: int, *, timeout_s: float = 10.0) -> Non
 @pytest.mark.integration
 def test_uvicorn_reel_ne_trace_pas_une_exception_non_rattrapee() -> None:
     """Un vrai process uvicorn, une exception non rattrapée portant une
-    adresse et un numéro : ni l'un ni l'autre ne doivent apparaître sur
-    stdout, et le mot « Traceback » ne doit pas y figurer non plus.
+    adresse, un numéro et un fragment de CV : aucun des trois ne doit
+    apparaître sur stdout, et le mot « Traceback » ne doit pas y figurer non
+    plus.
     """
     host = "127.0.0.1"
     port = _port_libre()
     script = _SCRIPT_SERVEUR.format(
-        racine=str(RACINE_DEPOT), adresse=ADRESSE, tel=TEL, host=host, port=port
+        racine=str(RACINE_DEPOT), adresse=ADRESSE, tel=TEL, cv=MARQUEUR_CV, host=host, port=port
     )
 
     processus = subprocess.Popen(
@@ -122,6 +128,7 @@ def test_uvicorn_reel_ne_trace_pas_une_exception_non_rattrapee() -> None:
     assert sortie, "le process n'a rien écrit sur stdout : le test ne prouve rien"
     assert ADRESSE not in sortie
     assert TEL not in sortie
+    assert MARQUEUR_CV not in sortie
     assert "Traceback" not in sortie
     # Le type de l'exception reste journalisé (gestionnaire global) : on ne
     # veut pas perdre la trace de l'INCIDENT, seulement son contenu.

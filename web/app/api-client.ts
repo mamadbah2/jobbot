@@ -16,6 +16,7 @@ import {
   lireCookieSession,
   type CookieSession,
   type PageOffres,
+  type Profil,
   type Utilisateur,
 } from './api-contrat.ts'
 
@@ -117,6 +118,36 @@ export async function moi(): Promise<Utilisateur | null> {
 export async function listerOffres(limite = 20, decalage = 0): Promise<PageOffres> {
   const reponse = await appeler(`/offres?limite=${limite}&decalage=${decalage}`)
   return (await reponse.json()) as PageOffres
+}
+
+export async function profil(): Promise<Profil | null> {
+  try {
+    return (await (await appeler('/profil')).json()) as Profil
+  } catch (erreur) {
+    if (erreur instanceof ErreurApi && erreur.statut === 401) return null
+    throw erreur
+  }
+}
+
+export async function deposerCv(fichier: File): Promise<Profil> {
+  const corps = new FormData()
+  corps.append('fichier', fichier)
+  // Pas de Content-Type manuel : le FormData pose sa propre frontière multipart.
+  const reponse = await appeler('/profil/cv', { method: 'POST', body: corps })
+  return (await reponse.json()) as Profil
+}
+
+export async function corrigerProfil(donnees: Record<string, unknown>): Promise<Profil> {
+  const reponse = await appeler('/profil', {
+    method: 'PUT',
+    body: JSON.stringify(donnees),
+    headers: { 'Content-Type': 'application/json' },
+  })
+  return (await reponse.json()) as Profil
+}
+
+export async function supprimerMesDonnees(): Promise<void> {
+  await appeler('/moi', { method: 'DELETE' })
 }
 
 export async function deconnecter(): Promise<void> {
