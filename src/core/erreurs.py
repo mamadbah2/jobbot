@@ -98,6 +98,17 @@ class CvTypeRefuse(ErreurMetier):
     code = "cv_type_refuse"
 
 
+class CvDocAncien(ErreurMetier):
+    """Ancien fichier Word `.doc` (format binaire OLE, d'avant 2007).
+
+    Distinct de `CvTypeRefuse`, dont le message annonce « PDF, Word ou photo » :
+    l'utilisateur ne comprendrait pas qu'on refuse son fichier Word. Le lire
+    demanderait une dépendance de plus ; le réenregistrer en .docx prend dix
+    secondes. Refusé avant tout appel payant."""
+
+    code = "cv_doc_ancien"
+
+
 class CvTropGros(ErreurMetier):
     code = "cv_trop_gros"
 
@@ -129,6 +140,20 @@ class CvIllisible(ErreurMetier):
         # Dollars déjà dépensés quand l'analyse abandonne après relance : deux
         # appels payés ne doivent pas disparaître du suivi de marge. Un attribut
         # et non une sous-classe : le statut HTTP se résout par type exact.
+        self.cout = cout
+
+
+class CvPasUnCv(ErreurMetier):
+    """Le modèle a lu le document et juge que ce n'est pas un CV : modèle vierge,
+    lettre, offre d'emploi, proposition commerciale (décision du 2026-10-21).
+
+    L'analyse a été menée à son terme et payée : comme `CvIllisible`, la place
+    du jour reste consommée et le coût voyage avec l'erreur."""
+
+    code = "cv_pas_un_cv"
+
+    def __init__(self, cout: Decimal | None = None) -> None:
+        super().__init__(self.code)
         self.cout = cout
 
 

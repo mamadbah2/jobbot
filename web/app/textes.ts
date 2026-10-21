@@ -20,9 +20,11 @@ export const CODES_ERREUR = [
   'nom_invalide',
   'jeton_invalide',
   'cv_type_refuse',
+  'cv_doc_ancien',
   'cv_trop_gros',
   'cv_sans_texte',
   'cv_illisible',
+  'cv_pas_un_cv',
   'trop_d_analyses',
   'analyse_indisponible',
   'profil_absent',
@@ -48,6 +50,8 @@ export const ERREURS: Record<string, string> = {
   nom_invalide: "Ce nom ne semble pas valide. Utilisez votre prénom et votre nom.",
   jeton_invalide: "Votre session a expiré. Reconnectez-vous.",
   cv_type_refuse: "Nous acceptons les fichiers PDF, Word, ou une photo de votre CV.",
+  cv_doc_ancien:
+    "Les anciens fichiers Word (.doc) ne sont pas acceptés. Dans Word, faites « Enregistrer sous » et choisissez .docx ou PDF.",
   cv_trop_gros: "Ce fichier est trop lourd. Essayez un fichier de moins de 5 Mo.",
   cv_sans_texte:
     "Nous n'avons pas réussi à lire le texte de ce document. S'il s'agit d'un scan, envoyez plutôt une photo de votre CV.",
@@ -56,6 +60,7 @@ export const ERREURS: Record<string, string> = {
   // Le texte doit être juste dans les deux cas.
   cv_illisible:
     "Nous n'avons pas réussi à lire ce CV. S'il est protégé par un mot de passe, retirez la protection. Sinon, essayez un autre fichier, ou une photo.",
+  cv_pas_un_cv: 'Ce document ne ressemble pas à un CV. Déposez votre CV en PDF, en Word ou en photo.',
   trop_d_analyses: "Vous avez déjà analysé plusieurs CV aujourd'hui. Revenez demain.",
   analyse_indisponible: "L'analyse n'est pas disponible pour le moment. Réessayez dans quelques minutes.",
   profil_absent: "Déposez d'abord votre CV.",

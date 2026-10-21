@@ -18,9 +18,13 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any, Literal
 
-from src.core.erreurs import CvIllisible, CvSansTexte, CvTypeRefuse
+from src.core.erreurs import CvDocAncien, CvIllisible, CvSansTexte, CvTypeRefuse
 
 TypeCv = Literal["pdf", "docx", "jpeg", "png"]
+
+# Conteneur OLE : `.doc`, mais aussi `.xls` et `.ppt` d'avant 2007. Un CV dans
+# ce format est presque toujours un `.doc` ; le message parle donc de Word.
+_SIGNATURE_OLE = b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"
 
 _SIGNATURES: tuple[tuple[bytes, TypeCv], ...] = (
     (b"%PDF", "pdf"),
@@ -41,6 +45,8 @@ def reconnaitre_type(contenu: bytes) -> TypeCv:
     for signature, type_cv in _SIGNATURES:
         if contenu.startswith(signature):
             return type_cv
+    if contenu.startswith(_SIGNATURE_OLE):
+        raise CvDocAncien
     raise CvTypeRefuse
 
 

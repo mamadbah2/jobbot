@@ -19,7 +19,7 @@ from src.core.cv_fichier import (
     extraire_texte,
     reconnaitre_type,
 )
-from src.core.erreurs import CvIllisible, CvSansTexte, CvTypeRefuse
+from src.core.erreurs import CvDocAncien, CvIllisible, CvSansTexte, CvTypeRefuse
 
 JPEG = b"\xff\xd8\xff\xe0" + b"\x00" * 64
 PNG = b"\x89PNG\r\n\x1a\n" + b"\x00" * 64
@@ -217,3 +217,13 @@ def test_le_crenage_dun_pdf_word_ne_coupe_pas_les_mots() -> None:
     flux = b"BT /F1 10 Tf 72 700 Td [(Compt) 30 (abilit) -20 (\xe9 g\xe9n\xe9rale)] TJ ET"
     texte = extraire_texte(_pdf(flux), "pdf", minimum=5)
     assert "Comptabilité générale" in texte
+
+
+def test_un_ancien_fichier_word_est_refuse_avec_son_propre_code() -> None:
+    """Un .doc (format binaire OLE d'avant 2007) est refusé AVANT tout appel
+    payant, sous un code distinct : le message générique annonce « Word »,
+    l'utilisateur ne comprendrait pas pourquoi son fichier Word est refusé."""
+    ole = b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1" + b"\x00" * 64
+    with pytest.raises(CvDocAncien):
+        reconnaitre_type(ole)
+    assert issubclass(CvDocAncien, CvTypeRefuse) is False

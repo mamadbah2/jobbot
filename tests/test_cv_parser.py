@@ -14,7 +14,7 @@ from typing import Any
 import pytest
 from structlog.testing import capture_logs
 
-from src.core.erreurs import CvIllisible
+from src.core.erreurs import CvIllisible, CvPasUnCv
 from src.llm.client import CoutAppel
 from src.llm.cv_parser import VERSION_PROMPT_CV, analyser_cv
 from src.llm.prompts import TEMPERATURE_CV
@@ -32,6 +32,7 @@ PROFIL_VALIDE: dict[str, Any] = {
     "secteurs_vises": [],
     "mobilite": None,
     "pretention_salariale": None,
+    "est_un_cv": True,
     "transcription": "Awa Diop — Comptable — Alpha SARL 2019-2024 — UCAD Licence 2018",
 }
 
@@ -172,7 +173,9 @@ async def test_la_temperature_du_brief_arrive_jusqu_a_lappel() -> None:
     ("champ", "valeur"),
     [
         ("experiences", ["Alpha SARL"]),
-        ("experiences", [{"poste": "Comptable"}]),  # sans entreprise
+        ("experiences", [{"entreprise": "Alpha SARL"}]),  # sans poste
+        ("formations", [{"etablissement": "UCAD"}]),  # sans diplôme
+        ("experiences", [{"entreprise": 3, "poste": "Comptable"}]),
         ("formations", ["Licence"]),
         ("formations", [{"etablissement": "UCAD", "diplome": 3}]),
         ("competences", [{"nom": "SAGE"}]),
@@ -290,3 +293,60 @@ async def test_le_cout_dun_appel_interrompu_ne_fuite_pas_le_cv() -> None:
     assert "cv_appel_interrompu_apres_paiement" in rendu
     assert secret not in rendu
     assert "Alpha SARL" not in rendu
+
+
+@pytest.mark.parametrize(
+    ("champ", "valeur"),
+    [
+        ("formations", [{"etablissement": None, "diplome": "CAP Aide-Comptable", "annee": None}]),
+        ("formations", [{"diplome": "BFEM"}]),
+        ("experiences", [{"entreprise": None, "poste": "Commerçant indépendant"}]),
+    ],
+)
+async def test_une_ecole_ou_une_entreprise_absente_ne_fait_pas_rejeter_le_cv(
+    champ: str, valeur: object
+) -> None:
+    """Un CAP sans nom d'école, un commerçant sans employeur : le modèle met null
+    au lieu d'inventer, comme le prompt l'exige. Constaté sur un vrai CV le
+    2026-10-21 : tout le CV était rejeté, deux appels payés pour rien."""
+    profil, _, _ = await analyser_cv(
+        texte="x", appeler=_appel(json.dumps(dict(PROFIL_VALIDE, **{champ: valeur})))
+    )
+    assert profil[champ] == valeur
+
+
+async def test_un_document_qui_nest_pas_un_cv_est_refuse_sans_relance() -> None:
+    """Modèle vierge, proposition commerciale, lettre : refusés, et pas relancés
+    — le modèle a lu le document, il n'y a rien à retenter. L'appel payé
+    voyage avec l'erreur."""
+    appels = 0
+
+    async def appeler(messages: Any, **_: Any) -> tuple[str, CoutAppel]:
+        nonlocal appels
+        appels += 1
+        return json.dumps(dict(PROFIL_VALIDE, est_un_cv=False)), COUT
+
+    with pytest.raises(CvPasUnCv) as info:
+        await analyser_cv(texte="x", appeler=appeler)
+    assert appels == 1
+    assert info.value.cout == Decimal("0.0001")
+
+
+async def test_le_verdict_est_un_cv_nentre_pas_dans_le_profil() -> None:
+    profil, _, _ = await analyser_cv(texte="x", appeler=_appel(json.dumps(PROFIL_VALIDE)))
+    assert "est_un_cv" not in profil
+
+
+@pytest.mark.parametrize("valeur", [None, "oui", 1])
+async def test_un_verdict_est_un_cv_mal_forme_est_illisible(valeur: object) -> None:
+    mauvais = dict(PROFIL_VALIDE, est_un_cv=valeur)
+    with pytest.raises(CvIllisible):
+        await analyser_cv(texte="x", appeler=_appel(json.dumps(mauvais)))
+
+
+async def test_le_prompt_demande_le_verdict_et_autorise_lecole_absente() -> None:
+    from src.llm.prompts import PROMPT_CV
+
+    assert '"est_un_cv": boolean' in PROMPT_CV
+    assert '"etablissement": string | null' in PROMPT_CV
+    assert '"entreprise": string | null' in PROMPT_CV
