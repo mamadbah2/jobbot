@@ -31,6 +31,11 @@ _SIGNATURES: tuple[tuple[bytes, TypeCv], ...] = (
     (b"PK\x03\x04", "docx"),
 )
 
+# Écart minimal entre deux caractères, en fraction du corps, au-delà duquel
+# pdfplumber insère une espace. 0,15 sépare les mots LaTeX (~0,25 em) sans
+# couper les crénages de Word (quelques millièmes d'em). Testé dans les deux sens.
+_TOLERANCE_ESPACE = 0.15
+
 
 def reconnaitre_type(contenu: bytes) -> TypeCv:
     for signature, type_cv in _SIGNATURES:
@@ -49,7 +54,13 @@ def _lire_pdf(contenu: bytes) -> str:
     import pdfplumber
 
     with pdfplumber.open(io.BytesIO(contenu)) as document:
-        return "\n".join(page.extract_text() or "" for page in document.pages)
+        # Tolérance proportionnelle au corps du caractère, et non les 3 pt fixes
+        # par défaut : LaTeX sépare les mots par un DÉCALAGE (~2,5 pt en corps
+        # 10), sans caractère espace, et le défaut les fusionnait.
+        return "\n".join(
+            page.extract_text(x_tolerance_ratio=_TOLERANCE_ESPACE) or ""
+            for page in document.pages
+        )
 
 
 def _lire_docx(contenu: bytes) -> str:

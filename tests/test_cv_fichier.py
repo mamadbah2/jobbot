@@ -168,3 +168,52 @@ def test_un_docx_mis_en_page_en_tableau_est_lu() -> None:
     texte = extraire_texte(tampon.getvalue(), "docx", minimum=50)
     assert "Awa Diop" in texte
     assert "Sage Excel" in texte
+
+
+def _pdf(flux: bytes) -> bytes:
+    """PDF minimal, police Helvetica standard (aucune police embarquée)."""
+    objets = [
+        b"<< /Type /Catalog /Pages 2 0 R >>",
+        b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842]"
+        b" /Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R >>",
+        b"<< /Length %d >>\nstream\n" % len(flux) + flux + b"\nendstream",
+        b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>",
+    ]
+    sortie = b"%PDF-1.4\n"
+    positions = []
+    for numero, objet in enumerate(objets, start=1):
+        positions.append(len(sortie))
+        sortie += b"%d 0 obj\n" % numero + objet + b"\nendobj\n"
+    debut_xref = len(sortie)
+    sortie += b"xref\n0 %d\n0000000000 65535 f \n" % (len(objets) + 1)
+    sortie += b"".join(b"%010d 00000 n \n" % p for p in positions)
+    sortie += b"trailer\n<< /Size %d /Root 1 0 R >>\nstartxref\n%d\n%%%%EOF\n" % (
+        len(objets) + 1,
+        debut_xref,
+    )
+    return sortie
+
+
+def test_un_pdf_latex_garde_ses_espaces_entre_les_mots() -> None:
+    """LaTeX (xdvipdfmx) n'écrit aucun caractère espace : il DÉCALE le mot suivant.
+
+    Avec la tolérance par défaut de pdfplumber (3 pt), un écart de 2,5 pt en
+    corps 10 était fusionné : « ResponsableTechniqueIT ». Constaté sur 16 CV
+    réels le 2026-10-21 (496 mots collés), que DeepSeek ne recollait pas
+    toujours (« fleetprovisioning » rendu comme une compétence).
+    """
+    flux = b"BT /F1 10 Tf 72 700 Td [(Responsable) -250 (Technique) -250 (IT)] TJ ET"
+    texte = extraire_texte(_pdf(flux), "pdf", minimum=5)
+    assert "Responsable Technique IT" in texte
+
+
+def test_le_crenage_dun_pdf_word_ne_coupe_pas_les_mots() -> None:
+    """Garde-fou inverse : un crénage serré à l'intérieur d'un mot reste un mot.
+
+    Word et LibreOffice ajustent l'approche entre lettres (quelques millièmes
+    de cadratin) ; une tolérance trop serrée rendrait « Compt abilité ».
+    """
+    flux = b"BT /F1 10 Tf 72 700 Td [(Compt) 30 (abilit) -20 (\xe9 g\xe9n\xe9rale)] TJ ET"
+    texte = extraire_texte(_pdf(flux), "pdf", minimum=5)
+    assert "Comptabilité générale" in texte
