@@ -13,7 +13,7 @@ from collections.abc import Awaitable, Callable
 from decimal import Decimal
 from typing import Any
 
-from src.core.erreurs import CvIllisible, ErreurMetier
+from src.core.erreurs import CvIllisible, CvPasUnCv, ErreurMetier
 from src.llm.client import CoutAppel, modele_lit_les_images
 from src.llm.prompts import PROMPT_CV, TEMPERATURE_CV, VERSION_PROMPT_CV
 from src.logging_setup import get_logger
@@ -52,32 +52,39 @@ def _liste_de_chaines(valeur: Any) -> bool:
     return isinstance(valeur, list) and all(isinstance(v, str) for v in valeur)
 
 
-def _elements_valides(valeur: Any, obligatoires: tuple[str, ...], optionnelle: str) -> bool:
-    """Chaque élément est un objet dont les clés obligatoires sont des chaînes.
+def _elements_valides(
+    valeur: Any, obligatoire: str, optionnelles: tuple[str, ...]
+) -> bool:
+    """Chaque élément est un objet : la clé obligatoire est une chaîne, chaque
+    optionnelle est une chaîne, null ou absente.
 
-    C'est `experiences[].entreprise` et `formations[].diplome` que le
-    post-contrôle anti-invention de la Phase 5 lira (§8.5).
+    L'employeur et l'établissement sont optionnels : un CAP sans école nommée ou
+    un commerçant indépendant sont fréquents, et le prompt exige null plutôt
+    qu'un nom inventé. Les exiger rejetait le CV entier (constaté le 2026-10-21).
+    Le post-contrôle anti-invention de la Phase 5 (§8.5) lira les noms PRÉSENTS ;
+    un null ne peut rien affirmer, il n'a rien à vérifier.
     """
     if not isinstance(valeur, list):
         return False
     for element in valeur:
         if not isinstance(element, dict):
             return False
-        if not all(isinstance(element.get(c), str) for c in obligatoires):
+        if not isinstance(element.get(obligatoire), str):
             return False
-        if element.get(optionnelle) is not None and not isinstance(
-            element[optionnelle], str
-        ):
-            return False
+        for cle in optionnelles:
+            if element.get(cle) is not None and not isinstance(element[cle], str):
+                return False
     return True
 
 
 def _valider(donnees: Any) -> dict[str, Any]:
     if not isinstance(donnees, dict):
         raise CvIllisible
-    if not _elements_valides(donnees.get("experiences"), ("entreprise", "poste"), "periode"):
+    if not isinstance(donnees.get("est_un_cv"), bool):
         raise CvIllisible
-    if not _elements_valides(donnees.get("formations"), ("etablissement", "diplome"), "annee"):
+    if not _elements_valides(donnees.get("experiences"), "poste", ("entreprise", "periode")):
+        raise CvIllisible
+    if not _elements_valides(donnees.get("formations"), "diplome", ("etablissement", "annee")):
         raise CvIllisible
     for cle in ("competences", "langues", "secteurs_vises"):
         if not _liste_de_chaines(donnees.get(cle)):
@@ -190,6 +197,13 @@ async def analyser_cv(
                 version_prompt=VERSION_PROMPT_CV,
             )
             continue
+        if not profil.pop("est_un_cv"):
+            # Pas de relance : le modèle a lu le document, le verdict ne
+            # changerait pas. Aucun contenu au journal, comme partout ici.
+            log.warning(
+                "cv_pas_un_cv", cout_usd=str(total.cout_usd), version_prompt=VERSION_PROMPT_CV
+            )
+            raise CvPasUnCv(cout=total.cout_usd)
         transcription = str(profil.pop("transcription"))
         return profil, transcription, total
 

@@ -16,7 +16,7 @@ import { journaliser } from '../journal'
 import { CONTRATS, REGIONS, SECTEURS, T, texteErreur, texteTropDeValeurs } from '../textes'
 import { enregistrerProfil, envoyerCv } from './actions'
 
-type Ligne = Record<string, string | undefined>
+type Ligne = Record<string, string | null | undefined>
 
 export default async function PageProfil({
   searchParams,
@@ -144,12 +144,12 @@ export default async function PageProfil({
             <ul>
               {experiences.map((e, i) => (
                 <li key={`e${i}`} className="meta">
-                  {e.poste} — {e.entreprise} {e.periode ? `(${e.periode})` : ''}
+                  {e.poste}{e.entreprise ? ` — ${e.entreprise}` : ''} {e.periode ? `(${e.periode})` : ''}
                 </li>
               ))}
               {formations.map((f, i) => (
                 <li key={`f${i}`} className="meta">
-                  {f.diplome} — {f.etablissement} {f.annee ? `(${f.annee})` : ''}
+                  {f.diplome}{f.etablissement ? ` — ${f.etablissement}` : ''} {f.annee ? `(${f.annee})` : ''}
                 </li>
               ))}
             </ul>

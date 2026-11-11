@@ -56,6 +56,18 @@ def test_un_type_refuse_ne_cree_aucun_profil(
 
 
 @pytest.mark.integration
+def test_un_ancien_doc_est_refuse_avec_son_propre_message(
+    client_auth: TestClient, fournisseur_courriel_espion: FournisseurCourrielEspion
+) -> None:
+    _connecter(client_auth, fournisseur_courriel_espion)
+    ole = b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1" + b"\x00" * 64
+    r = client_auth.post("/profil/cv", files={"fichier": ("cv.doc", ole)})
+    assert r.status_code == 415
+    assert r.json()["erreur"] == "cv_doc_ancien"
+    assert client_auth.get("/profil").json()["etat"] == "absent"
+
+
+@pytest.mark.integration
 def test_un_document_sans_texte_est_refuse_sans_appel_llm(
     client_auth: TestClient, fournisseur_courriel_espion: FournisseurCourrielEspion
 ) -> None:

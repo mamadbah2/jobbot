@@ -55,3 +55,7 @@ def test_les_erreurs_du_cv_ont_des_codes_stables() -> None:
     assert TropDAnalyses.code == "trop_d_analyses"
     assert AnalyseIndisponible.code == "analyse_indisponible"
     assert ProfilAbsent.code == "profil_absent"
+    from src.core.erreurs import CvDocAncien, CvPasUnCv
+
+    assert CvDocAncien.code == "cv_doc_ancien"
+    assert CvPasUnCv.code == "cv_pas_un_cv"
