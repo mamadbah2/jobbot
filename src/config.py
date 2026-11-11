@@ -15,6 +15,10 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 Environment = Literal["dev", "prod"]
 
+# Mot de passe de `.env.example`, donc publié avec le dépôt (public). Permis en
+# dev, où Postgres n'écoute que sur 127.0.0.1 ; refusé en prod (CLAUDE.md §14.11).
+MOT_DE_PASSE_DEV_PUBLIC = "jobbot_dev_password"
+
 
 class Settings(BaseSettings):
     """Réglages du projet, chargés depuis l'environnement ou un fichier .env."""
@@ -34,7 +38,9 @@ class Settings(BaseSettings):
     postgres_host: str = "postgres"
     postgres_port: int = 5432
     postgres_user: str = "jobbot"
-    postgres_password: SecretStr = SecretStr("jobbot_dev_password")
+    # Sans valeur par défaut (§14.11) : vide = refus de démarrer, voir le
+    # validateur plus bas. Un défaut ici serait forcément public.
+    postgres_password: SecretStr = SecretStr("")
     postgres_db: str = "jobbot"
 
     # --- Redis ---
@@ -143,6 +149,26 @@ class Settings(BaseSettings):
     def cookie_session_secure(self) -> bool:
         """Cookie `Secure` en production ; en dev on travaille en HTTP."""
         return self.is_prod
+
+    @model_validator(mode="after")
+    def _exiger_un_mot_de_passe_postgres(self) -> Settings:
+        """L'ancienne valeur par défaut était celle de `.env.example`, publique :
+        un déploiement qui oubliait la variable démarrait avec un mot de passe
+        connu de tous, et aucun garde-fou de prod ne le voyait (§14.11)."""
+        valeur = self.postgres_password.get_secret_value()
+        if not valeur:
+            raise ValueError(
+                "POSTGRES_PASSWORD est obligatoire. En développement, copiez "
+                "`.env.example` vers `.env` ; en production, générez-en un avec : "
+                "python -c 'import secrets; print(secrets.token_urlsafe(32))'"
+            )
+        if self.is_prod and valeur == MOT_DE_PASSE_DEV_PUBLIC:
+            raise ValueError(
+                "POSTGRES_PASSWORD vaut le mot de passe de `.env.example`, publié "
+                "avec le dépôt : interdit en production. Générez-en un avec : "
+                "python -c 'import secrets; print(secrets.token_urlsafe(32))'"
+            )
+        return self
 
     @model_validator(mode="after")
     def _exiger_un_secret_en_prod(self) -> Settings:
