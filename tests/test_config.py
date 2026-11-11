@@ -2,26 +2,89 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 from pydantic import ValidationError
 
-from src.config import Settings, get_settings
+from src.config import MOT_DE_PASSE_DEV_PUBLIC, Settings, get_settings
+
+RACINE = Path(__file__).resolve().parent.parent
 
 
-def test_aucune_valeur_n_est_obligatoire(monkeypatch: pytest.MonkeyPatch) -> None:
-    """`TELEGRAM_BOT_TOKEN` était la seule valeur obligatoire du projet, et
-    l'était pour TOUS les processus : l'API et les workers refusaient de
-    démarrer sans elle. Depuis son retrait, `.env.example` se copie et la pile
-    démarre sans qu'une seule valeur soit renseignée — c'est le critère de
-    validation de la Phase 0 (CLAUDE.md §12), désormais vrai sans réserve."""
+def _vider_env(monkeypatch: pytest.MonkeyPatch) -> None:
     # Seuls les noms que `Settings` lit, et pas toutes les variables en
     # majuscules : effacer PATH, HOME ou LANG le temps d'un test est
     # gratuitement dangereux, même si monkeypatch les restaure ensuite.
     for champ in Settings.model_fields:
         monkeypatch.delenv(champ.upper(), raising=False)
     get_settings.cache_clear()
+
+
+def test_env_example_suffit_a_demarrer(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Critère de la Phase 0 (CLAUDE.md §12) : la pile démarre à partir du seul
+    `.env.example`. `POSTGRES_PASSWORD` est désormais obligatoire (§14.11) ;
+    ce test garantit que `.env.example` la fournit, et fournira toute valeur
+    obligatoire ajoutée plus tard."""
+    _vider_env(monkeypatch)
+    monkeypatch.setitem(Settings.model_config, "env_file", RACINE / ".env.example")
     reglages = Settings()  # type: ignore[call-arg]
     assert reglages.environment == "dev"
+
+
+def test_mot_de_passe_postgres_obligatoire(monkeypatch: pytest.MonkeyPatch) -> None:
+    """§14.11 : sans valeur par défaut. L'ancienne valeur par défaut était publiée
+    dans `.env.example` (dépôt public) : un déploiement qui oubliait la variable
+    démarrait avec un mot de passe connu de tous, sans que rien ne crie."""
+    _vider_env(monkeypatch)
+    with pytest.raises(ValidationError, match="POSTGRES_PASSWORD"):
+        Settings()  # type: ignore[call-arg]
+
+
+def test_mot_de_passe_postgres_vide_refuse(monkeypatch: pytest.MonkeyPatch) -> None:
+    """`POSTGRES_PASSWORD=` (ligne copiée sans valeur) vaut une absence."""
+    monkeypatch.setenv("POSTGRES_PASSWORD", "")
+    get_settings.cache_clear()
+    with pytest.raises(ValidationError, match="POSTGRES_PASSWORD"):
+        get_settings()
+
+
+def _env_prod_valide(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Prod complète, sauf le point testé : isole le garde-fou du mot de passe
+    des deux autres garde-fous de prod (JWT_SECRET, fournisseur console)."""
+    monkeypatch.setenv("ENVIRONMENT", "prod")
+    monkeypatch.setenv("JWT_SECRET", "x" * 48)
+    monkeypatch.setenv("FOURNISSEUR_COURRIEL", "fournisseur_reel")
+    get_settings.cache_clear()
+
+
+def test_mot_de_passe_de_dev_refuse_en_prod(monkeypatch: pytest.MonkeyPatch) -> None:
+    """§14.11 : la valeur de `.env.example` est publique, donc interdite en prod."""
+    _env_prod_valide(monkeypatch)
+    monkeypatch.setenv("POSTGRES_PASSWORD", MOT_DE_PASSE_DEV_PUBLIC)
+    with pytest.raises(ValidationError, match="POSTGRES_PASSWORD"):
+        get_settings()
+
+
+def test_mot_de_passe_propre_accepte_en_prod(monkeypatch: pytest.MonkeyPatch) -> None:
+    _env_prod_valide(monkeypatch)
+    monkeypatch.setenv("POSTGRES_PASSWORD", "un-vrai-mot-de-passe-genere")
+    assert get_settings().is_prod
+
+
+def test_mot_de_passe_de_dev_accepte_en_dev(monkeypatch: pytest.MonkeyPatch) -> None:
+    """En dev, la valeur publique reste permise : Postgres n'écoute que sur
+    127.0.0.1 (docker-compose.yml) et c'est celle de `.env.example`."""
+    monkeypatch.setenv("POSTGRES_PASSWORD", MOT_DE_PASSE_DEV_PUBLIC)
+    get_settings.cache_clear()
+    assert get_settings().environment == "dev"
+
+
+def test_constante_alignee_sur_env_example() -> None:
+    """Si `.env.example` change de mot de passe sans que la constante suive,
+    le garde-fou de prod ne protège plus rien, en silence."""
+    texte = (RACINE / ".env.example").read_text(encoding="utf-8")
+    assert f"POSTGRES_PASSWORD={MOT_DE_PASSE_DEV_PUBLIC}" in texte.splitlines()
 
 
 def test_defauts_metier() -> None:

@@ -103,7 +103,7 @@ du déploiement : rien ici ne s'active tout seul.
 | `ENVIRONMENT=prod` | Sans lui, aucun secret JWT n'est exigé et le cookie de session perd son drapeau `Secure` |
 | `JWT_SECRET` d'au moins 32 caractères | Sinon le démarrage échoue en `prod` — c'est voulu |
 | `PROXY_IPS_DE_CONFIANCE` **et** `WEB_DERRIERE_PROXY` | Les deux ou aucun. Sans eux, le plafond par IP compte tous les utilisateurs ensemble ; avec l'un des deux seulement, ou avec une valeur trop large, l'IP devient usurpable et le plafond ne vaut plus rien |
-| `POSTGRES_PASSWORD` explicite | `.env.example` est public et `src/config.py` a une valeur par défaut — **la même** : `jobbot_dev_password`, publiée dans les deux fichiers |
+| `POSTGRES_PASSWORD` généré, propre à la prod | Sans lui, le démarrage échoue — c'est voulu. La valeur de `.env.example` (`jobbot_dev_password`, publique) est refusée en `prod` |
 | `FOURNISSEUR_COURRIEL` autre que `console` | Sinon le démarrage échoue en `prod` — `console` écrit le code de vérification en clair dans les logs |
 | `DEEPSEEK_API_KEY` | Sans elle, le dépôt d'un CV est accepté puis l'analyse échoue (quota rendu) : l'écran `/profil` ne produit jamais de profil. Un CV est refusé avant tout appel payant s'il n'a pas de texte |
 | `ADMIN_COURRIEL` | Sans lui, une alerte de scraper cassé ne part nulle part : elle reste dans les logs du VPS, à lire à la main |
